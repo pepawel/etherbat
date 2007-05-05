@@ -1374,8 +1374,8 @@ def show_results(raw, show_raw)
   layouts[1] = 8
 
   possible.each do |p|
-    puts trees[layouts[p]]
     puts
+    puts trees[layouts[p]]
   end
 end
 

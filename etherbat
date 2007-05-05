@@ -15,9 +15,10 @@ require 'optparse'
 require 'timeout'
 require 'socket'
 
-OWT = 0.009
-REPT = 0.002
-RTT = OWT * 2 + REPT
+# Time constants
+OWT = 0.009 # One way time
+REPT = 0.002 # Reply time
+RTT = OWT * 2 + REPT # Round trip time
 
 # Simple debug routine
 def debug(text)
@@ -40,6 +41,20 @@ public
     ((defined? @finished) && (defined? @result)) ? @result : nil
   end
 
+  # For use only by lowest subclasses, as they guarantee 3 arguments
+  def self.repeat(count, h0, h1, h2)
+    raise "Repeat count < 1 in #{self.class}" if count < 1
+    test_obj = nil
+    count.times do |i|
+      # warning is an instance method, this is class method
+      # so object needed
+      self.warning "Repeating test, try #{i+1} of #{count}" if test_obj
+      test_obj = self.new(h0, h1, h2)
+      break if test_obj.result
+    end
+    test_obj
+  end
+
 # Methods only for use in test_loop and internally.
 private
 
@@ -54,6 +69,10 @@ private
   end
   def warning(text)
     super("(#{self.class}) #{text}")
+  end
+  # Class method variant of warning method
+  def self.warning(text)
+    super("(#{self}) #{text}")
   end
 
 
@@ -1136,11 +1155,13 @@ end
 
 class OptParse
   attr_reader :host_1_ip, :host_1_mac, :host_2_ip, :host_2_mac, \
-              :host_0_ip, :host_0_mac, :host_b_mac, :debug, :raw, :iface
+              :host_0_ip, :host_0_mac, :host_b_mac, \
+              :debug, :raw, :iface, :repeat_count
   def initialize(args)
     @iface = "eth0"
     @debug = false
     @host_b_mac = "40:00:00:00:00:eb" # locally administered mac
+    @repeat_count = 3
     @raw = false
     version = "0.0.9"
 
@@ -1160,8 +1181,13 @@ class OptParse
             "default: #@host_b_mac") do |val|
       @host_b_mac = val
     end
+    opts.on("-r", "--repeat times", Integer,
+            "repeat each test when failed, default: " + \
+            "x #@repeat_count") do |val|
+      @repeat_count = val
+    end
     opts.on("-d", "--debug", "display debug information") {@debug = true}
-    opts.on("-r", "--raw", "display raw results, for debug") {@raw = true}
+    opts.on("--raw", "display raw results, for debug") {@raw = true}
     opts.on("--version", "show version") do
       puts "#{opts.program_name} #{version}"
       exit
@@ -1183,17 +1209,24 @@ end
 
 
 # FIXME: Rewrite to make it more object-related
-def perform_tests
-  results = []
-  [TestA1SD, TestA1P, TestA2SD, TestA2P, TestB1, TestB2].each do |cl|
-    test = yield cl
-    results << test.result
+# Maybe create class TestSequence. Objects of this class could
+# be indexed by test class and would have each method to get
+# test results in chronological order. This class could implement
+# test analysis. It would store all tests objects, also repeated
+# ones - change in Test.repeat required to yield and check its
+# return value. This way repeat will stop after yield returned true,
+# and all test objects would be accessible to TestSequence.
+def perform_tests(repeat_count, h0, h1, h2)
+  results = {}
+  [TestA1SD, TestA1P, TestA2SD, TestA2P, TestB1, TestB2].each do |t|
+    test_obj = t.repeat(repeat_count, h0, h1, h2)
+    results[t] = test_obj.result
   end
   results
 end
 
 # FIXME: Bad results for 11?100 and ?11100
-def show_results(rr, show_raw)
+def show_results(raw, show_raw)
 
   trees = {}
   trees[1]  = " 0 1 2\n"
@@ -1231,78 +1264,79 @@ def show_results(rr, show_raw)
   trees[8] += "   *"
 
   if show_raw
-    print "Raw results: "
-    rr.each do |a|
-      print(a ? a : "?")
+    puts "Raw results: "
+    # FIXME: Ugly hack to keep order for now, in future use TestSequence
+    [TestA1SD, TestA1P, TestA2SD, TestA2P, TestB1, TestB2].each do |t|
+      puts "#{t}: #{(raw[t] ? raw[t] : '?')}"
     end
-    puts
   end
 
   r = []
-  if rr[0] == 1
-    # OK, rr[1] is useless
+  if raw[TestA1SD] == 1
+    # OK, A1P is not needed
     # FIXME: there is no need to perform test
     r << 1
-  elsif rr[0] == 0 && rr[1] == 0
+  elsif raw[TestA1SD] == 0 && raw[TestA1P] == 0
     # OK
     r << 0
-  elsif rr[0] == 0 && rr[1] == 1
-    fatal "A1 test results are useless"
+  elsif raw[TestA1SD] == 0 && raw[TestA1P] == 1
+    warning "A1 results are useless"
     r << nil
-  elsif rr[0] != nil && rr[1] == nil
+  elsif raw[TestA1SD] != nil && raw[TestA1P] == nil
     warning "A1SD passed, A1P not passed -- using A1SD"
-    r << r[0]
-  elsif rr[1] != nil && rr[0] == nil
+    r << raw[TestA1SD]
+  elsif raw[TestA1P] != nil && raw[TestA1SD] == nil
     warning "A1P passed, A1SD not passed -- using A1P"
-    r << r[1]
-  elsif rr[0] == nil && rr[1] == nil
+    r << raw[TestA1P]
+  elsif raw[TestA1SD] == nil && raw[TestA1P] == nil
     r << nil
   else
-    fatal "Results not expected: [0]=#{rr[0]} [1]=#{rr[1]}"
+    fatal "Results not expected: A1SD=#{raw[TestA1SD]} A1P=#{raw[TestA1P]}"
     r << nil
   end
 
-  if rr[2] == 1
-    # OK, rr[2] is useless
+  if raw[TestA2SD] == 1
+    # OK, A2SD is not needed
     # FIXME: there is no need to perform test
     r << 1
-  elsif rr[2] == 0 && rr[3] == 0
+  elsif raw[TestA2SD] == 0 && raw[TestA2P] == 0
     # OK
     r << 0
-  elsif rr[2] == 0 && rr[3] == 1
-    fatal "A2 test results are useless"
+  elsif raw[TestA2SD] == 0 && raw[TestA2P] == 1
+    warning "A2 test results are useless"
     r << nil
-  elsif rr[2] != nil && rr[3] == nil
+  elsif raw[TestA2SD] != nil && raw[TestA2P] == nil
     warning "A2SD passed, A2P not passed -- using A2SD"
-    r << [2]
-  elsif rr[3] != nil && rr[2] == nil
+    r << raw[TestA2SD]
+  elsif raw[TestA2P] != nil && raw[TestA2SD] == nil
     warning "A2P passed, A2SD not passed -- using A2P"
-    r << r[3]
-  elsif rr[2] == nil && rr[3] == nil
+    r << raw[TestA2P]
+  elsif raw[TestA2SD] == nil && raw[TestA2P] == nil
     r << nil
   else
-    fatal "Results not expected: [2]=#{rr[2]} [3]=#{rr[3]}"
+    fatal "Results not expected: A2SD=#{raw[TestA2SD]} A2P=#{raw[TestA2P]}"
     r << nil
   end
 
-  if rr[4] == rr[5]
+  if raw[TestB1] == raw[TestB2]
     # OK
-    r << rr[4]
-  elsif rr[4] != rr[5] && rr[4] != nil && rr[5] != nil
-    fatal "B1 and B2 results differ, assuming B test not usefull"
+    r << raw[TestB1]
+  elsif raw[TestB1] != raw[TestB2] && \
+        raw[TestB1] != nil && raw[TestB2] != nil
+    warning "B1 and B2 results differ, assuming B test useless"
     # FIXME: If B1 != B2 then assuming B was not successfull may be
     # not enough
     r << nil
-  elsif rr[4] != nil && rr[5] == nil
+  elsif raw[TestB1] != nil && raw[TestB2] == nil
     warning "B1 passed, B2 not passed -- using B1"
-    r << rr[4]
-  elsif rr[5] != nil && rr[4] == nil
+    r << raw[TestB1]
+  elsif raw[TestB2] != nil && raw[TestB1] == nil
     warning "B2 passed, B1 not passed -- using B2"
-    r << rr[5]
-  elsif rr[4] == nil && rr[5] == nil
+    r << raw[TestB2]
+  elsif raw[TestB1] == nil && raw[TestB2] == nil
     r << nil
   else
-    fatal "Results not expected: [4]=#{rr[2]} [5]=#{rr[3]}"
+    fatal "Results not expected: B1=#{raw[TestB1]} B2=#{raw[TestB2]}"
     r << nil
   end
 
@@ -1412,10 +1446,7 @@ puts "2: #{host_2}"
 sniffer = Sniffer.create(options.iface)
 injector = Injector.create(options.iface)
 
-results = perform_tests do |test|
-  test.new(host_0, host_1, host_2)
-end
-puts
+results = perform_tests(options.repeat_count, host_0, host_1, host_2)
 
 show_results(results, options.raw)
 

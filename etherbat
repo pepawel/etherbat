@@ -1,0 +1,1423 @@
+#!/usr/bin/ruby -w
+
+# TODO: optimize creation of object of Frame class and subclassess.
+# Implement Frame.build with user-friendly interface (pass host objects),
+# and Frame.new with direct interface, specifing strings.
+# What about validating input? Maybe do not validate, as wrong input
+# does not pose security risk, only causes incorrect results.
+
+# FIXME: implement all TODOs
+# TODO: optimize sniffing mode - use dynamic bpf filters which could
+# be changed on runtime (i.e. with a command "setfilter" - like "start",
+# "stop")
+
+require 'optparse'
+require 'timeout'
+require 'socket'
+
+OWT = 0.009
+REPT = 0.002
+RTT = OWT * 2 + REPT
+
+# Simple debug routine
+def debug(text)
+  t = Time.now
+  STDERR.puts "#{t.tv_sec}.#{t.tv_usec} debug: " + text if EB_DEBUG
+end
+
+def fatal(text)
+  STDERR.puts "fatal: " + text
+end
+
+def warning(text)
+  STDERR.puts "warning: " + text
+end
+
+# All tests should be subclasses of TestGeneric
+class TestGeneric
+public
+  def result
+    ((defined? @finished) && (defined? @result)) ? @result : nil
+  end
+
+# Methods only for use in test_loop and internally.
+private
+
+  def failed(text)
+    STDERR.puts "test-failed: (#{self.class}) #{text}"
+  end
+  def debug(text)
+    super("(#{self.class}) #{text}")
+  end
+  def fatal(text)
+    super("(#{self.class}) #{text}")
+  end
+  def warning(text)
+    super("(#{self.class}) #{text}")
+  end
+
+
+  # Injects given frame. After the frame is sniffed test_loop yields
+  # with state equals to 'state_after_inject'.
+  # If frame can't be sniffed after 2 seconds raises exception.
+  # Uses the same timer as set_timer and can't be used in the same time
+  # as that method.
+  def inject(frame, state_after_inject)
+    raise "Can't inject when timer set" if @timeout_type == :wait
+    Injector.create.inject frame.to_s
+
+    @timeout = 2
+    @timeout_type = :inject
+    @timeout_just_set = true
+
+    @inject_frame = frame
+    @inject_state_after = state_after_inject
+  end
+
+  # In the next yield test_loop will set state to given value.
+  # Next yield begins after frame was sniffed or timeout expired,
+  # so if you don't want to wait use fast_goto.
+  # This method has lower priority than events caused by timer or inject,
+  # so these events could replace set state.
+  def goto(state)
+    @next_state = state
+    @fast_goto = false
+  end
+
+  # Same as goto but skips frame sniffing. Has higher priority than
+  # events caused by timer and inject, so these events can't overwrite
+  # set state.
+  def fast_goto(state)
+    @next_state = state
+    @fast_goto = true
+  end
+
+  # Goes to specified state after specified time passes.
+  # Does not interrupt running test_loop yield-block - if time passes
+  # when the block is executed the state is changed in next iteration.
+  # Can be cancelled with stop_timer.
+  # Uses same timer as inject, so can't be used with that method at the
+  # same time.
+  # When timeout event occur state set by goto is overwritten.
+  def set_timer(timeout, state_after_timeout)
+    raise "Can't set timer when injecting frame" if @timeout_type == :inject
+    @timeout = timeout
+    @timeout_type = :wait
+    @timeout_just_set = true
+    @wait_state_after = state_after_timeout
+  end
+
+  # Cancels timeout specified when calling set_timer and inject.
+  def stop_timer
+    @timeout = @timeout_type = @timeout_just_set = nil
+  end
+
+  # Causes test_loop to stop yielding and ends test gracefully,
+  # i.e. stops sniffer.
+  def finish_test
+    @finished = true
+  end
+
+  # Starts sniffing and yields every frame along with current state to
+  # given block.
+  # For the first iteraion state is :start and frame is nil.
+  # If state is not changed with [fast_]goto, inject or set_timer it
+  # remains the same thru iterations.
+  # If timeout set by set_timer expires frame is nil.
+  # NOTE: Do not use break in yield block as it causes the sniffer
+  # to remain running. Use finish_test method instead.
+  #
+  # TODO: Is there any way to make this method less complicated?
+  def test_loop
+    sniffer = Sniffer.create
+    sniffer.start
+
+    @inject_frame = nil
+    stop_timer
+    goto :start
+    frame = nil
+    loop_time = 0
+
+    loop do
+      begin
+        # Get time for loop time computation and yield frame and state
+        before_loop = Time.now
+        debug "state: #{@next_state}"
+        yield frame, @next_state
+        after_yield = Time.now
+        break if defined? @finished # set by finish_test
+
+        # Decrement timeout if set
+        if @timeout.nil?
+          wait_time = 0
+        else
+          if ! @timeout_just_set
+            @timeout -= loop_time
+            # Raise timeout only if no fast_goto is performed at the
+            # moment. Fast goto shouldn't be interrupted.
+            raise Timeout::Error if @timeout <= 0 && ! @fast_goto
+          end
+          wait_time = @timeout
+        end
+
+        # Skip frame sniffing when doing fast_goto
+        if @fast_goto
+          @fast_goto = false
+          debug "state changed by fast_goto"
+        else
+          if wait_time == 0
+            warning "No timeout set, test logic error? " \
+                    "(state: #{@next_state})"
+          end
+          # Sniff one frame - if wait_time == 0 wait forever
+          timeout(wait_time) { frame = sniffer.next_frame }
+          debug "frame: #{frame}"
+        end
+
+      rescue Timeout::Error
+        # Handle timeout differently depending on operation performed
+        case @timeout_type
+        when :wait
+          @next_state = @wait_state_after
+          frame = nil
+        when :inject
+          raise "Can't sniff injected frame"
+        else
+          raise "Timeout when no timer set -- should not happen"
+        end
+
+        stop_timer
+      end
+
+      # Check if injected frame was sniffed (if it was injected)
+      if @timeout_type == :inject && @inject_frame && \
+         frame == @inject_frame && frame.direction == :out
+        @next_state = @inject_state_after
+        @inject_frame = nil
+        stop_timer
+      end
+
+      # How much time was spent in this loop iteration
+      after_loop = Time.now
+      if @timeout_just_set
+        loop_time = after_loop - after_yield
+        @timeout_just_set = nil
+      else
+        loop_time = after_loop - before_loop
+      end
+    end
+
+    sniffer.stop
+    debug "Sniffer stopped"
+  end
+end
+
+class TestA < TestGeneric
+  def initialize(h0, hx, hy, hy_p2_smac)
+    debug "0: #{h0}"
+    debug "x: #{hx}"
+    debug "y: #{hy}"
+
+    # Prepare frames
+    p1 = Frame.new(hy, hx, "IP")  # Zero-sized IP
+    p1_reversed = Frame.new(hx, hy, "IP")
+    p1a = ArpReq.new(h0, hx, hy, hy, Host.null, hx)
+    p1a_reply_asym = ArpReply.new(hx, hy, hx, hx, hy, hy)
+    p1a_reply_sym = ArpReply.new(hx, h0, hx, hx, h0, hy)
+    p2 = ArpReq.new(h0, Host.broadcast, hy_p2_smac, h0, Host.null, hy)
+    p2_reply_asym = ArpReply.new(hy, hy_p2_smac, hy, hy, hy, h0)
+    p2_reply_sym = ArpReply.new(hy, h0, hy, hy, h0, h0)
+    p3 = p1a
+    p3_reply_asym = p1a_reply_asym
+    p3_reply_sym = p1a_reply_sym
+    fix = ArpReq.new(h0, Host.broadcast, h0, h0, Host.null, hy)
+    # In following case sym == asum
+    fix_reply = ArpReply.new(hy, h0, hy, hy, h0, h0)
+
+    test_loop do |frame, state|
+      case state
+      when :start
+        inject(p1, :p1_inject_ack)
+        goto :idle
+
+      # p1
+      when :p1_inject_ack
+        debug "OK: p1 injected"
+        set_timer(RTT, :p1_no_reply)
+        goto :p1_wait_for_reply
+      when :p1_wait_for_reply
+        case frame
+        when p1_reversed
+          # Spoofing was successfull
+          debug "OK: Possible reply to p1"
+          stop_timer
+          fast_goto :p1a_start
+        else
+          check_frame = true
+        end
+      when :p1_no_reply
+        # Good - no reply expected
+        fast_goto :p1a_start
+
+      # p1a
+      when :p1a_start
+        inject(p1a, :p1a_inject_ack)
+        goto :idle
+      when :p1a_inject_ack
+        debug "OK: p1a injected"
+        set_timer(RTT, :p1a_no_reply)
+        goto :p1a_wait_for_reply
+      when :p1a_wait_for_reply
+        case frame
+        when p1a_reply_asym
+          debug "OK: Asymetric ARP reply to p1a"
+          stop_timer
+          fast_goto :p2_start
+        when p1a_reply_sym
+          failed "Symetric ARP reply to p1a"
+          stop_timer
+          fast_goto :fix_start
+        else
+          check_frame = true
+        end
+      when :p1a_no_reply
+        failed "No reply to p1a"
+        fast_goto :fix_start
+
+      # p2
+      when :p2_start
+        inject(p2, :p2_inject_ack)
+        goto :idle
+      when :p2_inject_ack
+        debug "OK: p2 injected"
+        set_timer(RTT, :p2_no_reply)
+        goto :p2_wait_for_reply
+      when :p2_wait_for_reply
+        case frame
+        when p2_reply_asym
+          failed "Network shouldn't deliver reply to p2"
+          stop_timer
+          fast_goto :fix_start
+        when p2_reply_sym
+          failed "Symetric ARP reply to p2"
+          stop_timer
+          fast_goto :fix_start
+        else
+          check_frame = true
+        end
+      when :p2_no_reply
+        # Good - no reply expected
+        fast_goto :p3_start
+
+      # p3
+      when :p3_start
+        inject(p3, :p3_inject_ack)
+        goto :idle
+      when :p3_inject_ack
+        debug "OK: p3 injected"
+        set_timer(RTT, :p3_no_reply)
+        goto :p3_wait_for_reply
+      when :p3_wait_for_reply
+        case frame
+        when p3_reply_asym
+          debug "OK: Asymetric ARP reply to p3"
+          stop_timer
+          @result = 1
+          fast_goto :fix_start
+        when p3_reply_sym
+          failed "Symetric ARP reply to p3"
+          stop_timer
+          fast_goto :fix_start
+        else
+          check_frame = true
+        end
+      when :p3_no_reply
+        debug "OK: No reply to p3"
+        @result = 0
+        fast_goto :fix_start
+
+      # fix phase
+      when :fix_start
+        # Fix is invoked from different places, maybe there is
+        # timer running (bug this is bug in test logic!).
+        stop_timer
+        inject(fix, :fix_inject_ack)
+        goto :fix_idle
+      when :fix_idle
+        # nop
+      when :fix_inject_ack
+        debug "OK: fix injected"
+        set_timer(RTT, :fix_no_reply)
+        goto :fix_wait_for_reply
+      when :fix_wait_for_reply
+        case frame
+        when fix_reply
+          debug "OK: ARP reply to fix"
+          finish_test
+        when fix
+          if frame.direction == :in
+            warning "Network generated duplicate of sent fix frame"
+          end
+        else
+          # Do not check other frames as it may result in endless loop
+        end
+      when :fix_no_reply
+        warning "No reply to fix"
+        finish_test
+
+      when :idle
+        check_frame = true
+
+      else
+        raise "Unknown state: '#{state}'"
+      end
+
+      # If frame requires extra processing do it here
+      if (defined? check_frame) && check_frame != nil
+        check_frame = nil
+        if frame
+          debug "Testing jabber:"
+          debug "> #{frame}"
+          # Detect duplicates
+          # No way to reliably detect p1 duplicates in current framework
+          if (frame.direction == :in) && ([p1a,p2,p3].include?(frame))
+            failed "Network generated duplicate of sent frame"
+            fast_goto :fix_start
+          # Detect jabber
+          elsif frame.enet_src == hy.mac
+            if frame.direction == :in
+              failed "y (#{hy.name}) is jabbering"
+              finish_test # no need to fix switches, y done this
+            else
+              failed "0 is spoofing y (#{hy.name})"
+              fast_goto :fix_start
+            end
+          elsif frame.class == ArpReq && frame.arp_tip == hy.ip
+            if frame.direction == :in
+              failed "Someone is talking to y (#{hy.name}), it _will_ reply"
+              fast_goto :fix_start
+            else
+              failed "0 is talking to y (#{hy.name}), it _will_ reply"
+              fast_goto :fix_start
+            end
+          elsif frame.enet_dst == hy.mac
+            if frame.direction == :in
+              failed "Someone is talking to y (#{hy.name}), it _may_ reply"
+              fast_goto :fix_start
+            else
+              failed "0 is talking to y (#{hy.name})"
+              fast_goto :fix_start
+            end
+          else
+            debug "Not harmful jabber"
+          end
+        else
+          raise "No frame to check in state #{state}"
+        end
+      end
+    end
+  end
+end
+
+class TestA1P < TestA
+  def initialize(h0, h1, h2)
+    super(h0, h1, h2, PAUSE)
+  end
+end
+
+class TestA1SD < TestA
+  def initialize(h0, h1, h2)
+    super(h0, h1, h2, h2)
+  end
+end
+
+class TestA2P < TestA
+  def initialize(h0, h1, h2)
+    super(h0, h2, h1, PAUSE)
+  end
+end
+
+class TestA2SD < TestA
+  def initialize(h0, h1, h2)
+    super(h0, h2, h1, h1)
+  end
+end
+
+# TODO: Create detailed test documentation
+class TestB < TestGeneric
+  def initialize(h0, hx, hy)
+    debug "0: #{h0}"
+    debug "x: #{hx}"
+    debug "y: #{hy}"
+
+    # Prepare frames
+    p1 = ArpReq.new(HOST_B, hy, hx, hx, Host.null, hy)
+    p1_reply_asym = ArpReply.new(hy, hx, hy, hy, hx, hx)
+    p1_reply_sym = ArpReply.new(hy, HOST_B, hy, hy, HOST_B, hx)
+    p2 = Frame.new(hy, HOST_B, "IP") # zero sized IP
+    p3 = ArpReq.new(h0, hx, hy, hy, Host.null, hx)
+    # FIXME: Test symetric replies - are there any variable parts?
+    # TODO: Fix ARP tables in case of symetric ARP replies
+    # TODO: Does Arp Request fix arp tables, or we need Arp Reply?
+    p3_reply_asym = ArpReply.new(hx, hy, hx, hx, hy, hy)
+    p3_reply_sym = ArpReply.new(hx, h0, hx, hx, h0, hy)
+    p3a = ArpReq.new(h0, hy, h0, h0, Host.null, hy)
+    # In following case sym == asum
+    p3a_reply = ArpReply.new(hy, h0, hy, hy, h0, h0)
+    fix = ArpReq.new(h0, Host.broadcast, h0, h0, Host.null, hy)
+    # In following case sym == asum
+    fix_reply = ArpReply.new(hy, h0, hy, hy, h0, h0)
+
+    test_loop do |frame, state|
+      case state
+      when :start
+        inject(p1, :p1_inject_ack)
+        goto :idle
+
+      when :p1_inject_ack
+        set_timer(RTT, :p2_start)
+        goto :p1_wait_for_reply
+      when :p1_wait_for_reply
+        case frame
+          when p1_reply_asym
+            failed "Network delivered reply to p1"
+            finish_test # No need to fix switches
+          when p1_reply_sym
+            failed "Symetric reply to p1"
+            finish_test # No need to fix switches
+          else
+            check_frame = true
+        end
+
+      when :p2_start
+        inject(p2, :p2_inject_ack)
+        goto :idle
+      when :p2_inject_ack
+        set_timer(OWT, :p3_start)
+        goto :idle
+
+      when :p3_start
+        inject(p3, :p3_inject_ack)
+        goto :idle
+      when :p3_inject_ack
+        set_timer(RTT, :p3_no_reply)
+        goto :p3_wait_for_reply
+      when :p3_wait_for_reply
+        case frame
+        when p3_reply_asym
+          debug "OK: Asymetric reply to p3"
+          @result = 1
+          stop_timer
+          fast_goto :p3a_start
+        when p3_reply_sym
+          failed "Symetric reply to p3"
+          stop_timer
+          fast_goto :fix_start
+        else
+          check_frame = true
+        end
+      when :p3_no_reply
+        debug "OK: No reply to p3"
+        @result = 0
+        fast_goto :p3a_start
+
+      when :p3a_start
+        inject(p3a, :p3a_inject_ack)
+        goto :idle
+      when :p3a_inject_ack
+        set_timer(RTT, :p3a_no_reply)
+        goto :p3a_wait_for_reply
+      when :p3a_wait_for_reply
+        if frame == p3a_reply
+          failed "Reply to p3a"
+          # Overwrite previously set result
+          @result = nil
+          # No need to fix switches - p3a reply has already done so
+          finish_test
+        else
+          check_frame = true
+        end
+      when :p3a_no_reply
+        debug "OK: No reply to p3a"
+        fast_goto :fix_start
+
+      # fix phase
+      when :fix_start
+        # Fix is invoked from different places, maybe there is
+        # timer running (bug this is bug in test logic!).
+        stop_timer
+        inject(fix, :fix_inject_ack)
+        goto :fix_idle
+      when :fix_idle
+        # nop
+      when :fix_inject_ack
+        debug "OK: fix injected"
+        set_timer(RTT, :fix_no_reply)
+        goto :fix_wait_for_reply
+      when :fix_wait_for_reply
+        case frame
+        when fix_reply
+          debug "OK: ARP reply to fix"
+          finish_test
+        when fix
+          if frame.direction == :in
+            warning "Network generated duplicate of sent fix frame"
+          end
+        else
+          # Do not check other frames as it may result in endless loop
+        end
+      when :fix_no_reply
+        warning "No reply to fix"
+        finish_test
+
+      when :idle
+        check_frame = true
+
+      else
+        raise "Unknown state: '#{state}'"
+      end
+
+      # If frame requires extra processing do it here
+      if (defined? check_frame) && check_frame != nil
+        check_frame = nil
+        if frame
+          debug "Testing jabber:"
+          debug "> #{frame}"
+          # Detect duplicates
+          # No way to reliably detect p2 duplicates in current framework
+          if (frame.direction == :in) && ([p1,p3,p3a].include?(frame))
+            failed "Network generated duplicate of sent frame"
+            fast_goto :fix_start
+          # Detect jabber
+          elsif frame.enet_src == hy.mac
+            if frame.direction == :in
+              failed "y (#{hy.name}) is jabbering"
+              finish_test # no need to fix switches, y done this
+            else
+              failed "0 is spoofing y (#{hy.name})"
+              fast_goto :fix_start
+            end
+          elsif frame.class == ArpReq && frame.arp_tip == hy.ip
+            if frame.direction == :in
+              failed "Someone is talking to y (#{hy.name}), it _will_ reply"
+              fast_goto :fix_start
+            else
+              failed "0 is talking to y (#{hy.name}), it _will_ reply"
+              fast_goto :fix_start
+            end
+          elsif frame.enet_dst == hy.mac
+            if frame.direction == :in
+              failed "Someone is talking to y (#{hy.name}), it _may_ reply"
+              fast_goto :fix_start
+            else
+              failed "0 is talking to y (#{hy.name})"
+              fast_goto :fix_start
+            end
+          else
+            debug "Not harmful jabber"
+          end
+        else
+          raise "No frame to check in state #{state}"
+        end
+      end
+    end
+  end
+end
+
+class TestB1 < TestB
+  def initialize(h0, h1, h2)
+    super(h0, h1, h2)
+  end
+end
+
+class TestB2 < TestB
+  def initialize(h0, h1, h2)
+    super(h0, h2, h1)
+  end
+end
+
+
+# FIXME: Fix this kludgy mess
+class Host
+  attr_reader :ip, :mac
+  attr_accessor :name
+
+  def initialize(ip, mac)
+    # Validate and rewrite ip
+    if ip.nil?
+      @ip = nil
+    else
+      t = ip.split "."
+      raise "Invalid IP address length: #{t.length}" if t.length != 4
+      @ip = ""
+      t.each do |s|
+        i = s.to_i
+        raise "Invalid IP address" if i < 0 || i > 255
+        @ip += "#{i}."
+      end
+      @ip.chop! # Remove the last dot
+    end
+
+    # FIXME: do resolving better
+    # After ip validity verified check if there is a need to resolve mac
+    if mac == :resolve
+      @mac = find_in_arp_table(@ip)
+      @mac = arping(@ip) if @mac == nil
+      raise "Can't resolve mac for ip: '#{ip}'" if @mac == nil
+      mac = @mac # Hack
+    end
+
+    # Validate and rewrite mac (even if just resolved)
+    if mac.nil?
+      @mac = nil
+    else
+      t = mac.split ":"
+      raise "Invalid MAC address length: #{t.length}" if t.length != 6
+      @mac = ""
+      t.each do |s|
+        i = s.to_i(16)
+        raise "Invalid MAC address" if i < 0 || i > 255
+        @mac += sprintf("%.2x:", i)
+      end
+      @mac.chop! # Remove the last colon
+    end
+    @name = "?"
+  end
+
+  def self.create_self(device)
+    # Get mac
+    begin
+      io_SIOCGIFHWADDR = 0x8927 # magic number
+      sock = Socket.new(Socket::AF_INET, Socket::SOCK_DGRAM,0)
+      b = [device,""].pack('a16h16')
+      sock.ioctl(io_SIOCGIFHWADDR, b)
+      sock.close
+    rescue SystemCallError
+      raise "Couldn't get MAC address of device #{device}"
+    end
+
+    mac = sprintf("%.2x:%.2x:%.2x:%.2x:%.2x:%.2x",
+          b[18], b[19], b[20], b[21], b[22], b[23])
+
+    begin
+      io_SIOCGIFADDR = 0x8915 # another magic number
+      sock = Socket.new(Socket::AF_INET, Socket::SOCK_DGRAM,0)
+      b = [device,""].pack('a16h16')
+      sock.ioctl(io_SIOCGIFADDR, b);
+      sock.close
+    rescue SystemCallError
+      raise "Couldn't get IP address of device #{device}"
+    end
+
+    ip = sprintf("%d.%d.%d.%d", b[20], b[21], b[22], b[23])
+
+    self.new(ip, mac)
+  end
+
+  def self.broadcast
+    self.new("255.255.255.255", "ff:ff:ff:ff:ff:ff")
+  end
+
+  def self.null
+    self.new("0.0.0.0", "00:00:00:00:00:00")
+  end
+
+  def self.new_mac(mac)
+    self.new(nil, mac)
+  end
+
+  def self.new_ip(ip)
+    self.new(ip, nil)
+  end
+
+  def to_s
+    (@ip == nil ? "ip_unset" : @ip) + " (" + \
+    (@mac == nil ? "mac_unset" : @mac) + ")"
+  end
+
+  def find_in_arp_table(ip)
+    # FIXME: Interface must not be ignored
+    File.readlines("/proc/net/arp").each do |line|
+      t = line.split
+      return t[3] if (t[0] == ip) && (t[3] != "00:00:00:00:00:00")
+    end
+    nil
+  end
+
+  def arping(ip)
+    # FIXME: Need h0 IP and MAC
+    # FIXME: For now dirty hack - ping and get mac from arp table
+    `ping -c 1 -W 1 #{ip} 2>&1 > /dev/null`
+    find_in_arp_table(ip)
+  end
+end
+
+# Everything that prints /^OK/ on startup and understands "exit" command
+class WireProc
+  def initialize(cmd)
+    @proc = IO.popen(cmd, "r+")
+    begin
+      if @proc.readline !~ /^OK/
+        raise "Starting of subprocess failed"
+      end
+    rescue EOFError
+      raise "Starting of subprocess failed"
+    end
+  end
+
+  def close
+    @proc.puts "exit"
+    @proc.close
+  end
+end
+
+class Injector < WireProc
+  private_class_method :new
+  @@injector = nil
+
+  def initialize(device_name)
+    super "./injector #{device_name}"
+  end
+
+  def self.create(device_name = nil)
+    @@injector = new(device_name) unless @@injector
+    @@injector
+  end
+
+  def inject(f_text)
+    @proc.puts(f_text)
+  end
+end
+
+class Sniffer < WireProc
+  private_class_method :new
+  @@sniffer = nil
+
+  def initialize(device_name)
+    super "./sniffer #{device_name}"
+    @status = :stopped
+  end
+
+  def self.create(device_name = nil)
+    @@sniffer = new(device_name) unless @@sniffer
+    @@sniffer
+  end
+
+  # Start sniffing, will block until acked
+  def start
+    if started?
+      raise "Sniffing already started"
+    end
+
+    @proc.puts "start"
+    @proc.flush
+
+    line = ""
+    begin
+      timeout(2) { line = @proc.readline }
+    rescue Timeout::Error
+      raise "Timeout waiting for sniffer start acknowledge"
+    end
+    if line =~ /^OK Sniffing started/
+      debug "Sniffing started"
+      @status = :started
+    else
+      raise "Sniffing start failed"
+    end
+  end
+  def stop
+    if ! started?
+      raise "Sniffing already stopped"
+    end
+
+    @proc.puts "stop"
+    # Flush frames already sniffed which have staled in sniffer-ruby buffer
+    # and wait for ack
+    begin
+      timeout(2) do
+        loop { break if @proc.readline =~ /^OK Sniffing stopped/ }
+      end
+    rescue Timeout::Error
+      raise "Timeout waiting for sniffing stop acknowledge"
+    end
+
+    @status = :stopped
+  end
+  def started?
+    @status == :started
+  end
+
+  # Return next frame from sniffer
+  def next_frame
+    return FrameFactory.create(@proc.readline)
+  end
+end
+
+class Interface
+end
+
+# Must be defined before Frame subclasses
+class FrameFactory
+  private_class_method :new # Don't allow for object creation
+  @@frame_types = []
+  # Register given frame types. Accept only 'Frame' subclasses.
+  def self.register(cl)
+    raise ArgumentError if ! (cl < Frame) || cl == Frame
+    if ! (cl.respond_to? :likeness)
+      raise ArgumentError, "#{cl} doesn't respond to likeness method"
+    end
+    @@frame_types << cl
+  end
+
+  # Creates new frame based on textual representation
+  # If multiple frame class matched create most specific one
+  def self.create(text)
+    f = text.split
+
+    # Compute likeness points for every registered frame class
+    candidates = {}
+    @@frame_types.each do |t|
+      candidates[t] = t.likeness(f[5], f[6])
+    end
+
+    # Pick the candidate - frame type with the highest point number
+    highest = duplicate = 0
+    candidate = Frame
+    was_higher = false
+    candidates.each do |k, v|
+      if v > highest
+        highest = v
+        candidate = k
+        was_higher = true
+      elsif v == highest
+        duplicate = v
+      end
+    end
+
+    # Check if there are multiple highest rated types
+    if was_higher && highest == duplicate
+      raise "More than one highest rated frame type"
+    end
+
+    # Create the frame using correct class and return it
+    candidate.create(f)
+  end
+end
+
+class Frame
+  attr_reader :direction, :timestamp
+  attr_reader :enet_src, :enet_dst, :protocol
+  #protected   :enet_src, :enet_dst, :protocol
+
+  def initialize(enet_src, enet_dst, protocol)
+    @enet_src = enet_src.mac
+    @enet_dst = enet_dst.mac
+    @protocol = protocol.to_s
+    @timestamp = Time.at(0)
+    @direction = nil
+    @local = nil # If true then frame is sent by etherbat
+  end
+
+  def self.create(f, subclass_params = [])
+    # Get basic frame parameters
+    if f.length >= 6
+      params = [Host.new_mac(f[2]), Host.new_mac(f[4])]
+      # If we are creating subclass then protocol is not specified
+      params << f[5] if self == Frame
+    else
+      raise "Frame too short: #{f.join(' ')}"
+    end
+
+    # Use all params to create new frame of correct class
+    params.concat subclass_params
+
+    o = self.new(*params)
+    # Set timestamp and direction
+    # f[0] and f[1] exists - previous code would raise exception if not
+    tv_sec, tv_usec = f[1].split(".")
+    o.timestamp = Time.at(tv_sec.to_i, tv_usec.to_i)
+    debug "Readline bug, line too short: '#{f[0]}'" if f[0].length != 2
+    o.direction = if f[0] =~ /i$/
+                    :in
+                  elsif f[0] =~ /o$/
+                    :out
+                  else
+                    # There should be no other directions nor
+                    # local tag in sniffed frames.
+                    raise "Invalid frame direction: #{f[0]}"
+                  end
+    return o # Return newly created object
+  end
+
+  # Compares only data contained in physical frame -- other attributes
+  # such as timestamp, direction or local are not compared.
+  def ==(f)
+    # Compare only when classes match
+    if self.class == f.class
+      @enet_src == f.enet_src && \
+      @enet_dst == f.enet_dst && \
+      @protocol == f.protocol
+    else
+      false
+    end
+  end
+
+  def direction=(direction)
+    if @direction.nil?
+      if (direction != :in) && (direction != :out)
+        raise ArgumentError, "Unknown direction"
+      else
+        @direction = direction
+      end
+    else
+      raise "Direction could be set only once"
+    end
+  end
+
+  def timestamp=(ts)
+    if Time.at(0) == @timestamp
+      if ts.class != Time
+        raise ArgumentError, "Invalid timestamp"
+      else
+        @timestamp = ts
+      end
+    else
+      raise "Timestamp could be set only once"
+    end
+  end
+
+  def set_local
+    if @local.nil?
+      @local = true
+    else
+      raise "Local flag could be set only once"
+    end
+  end
+
+  def is_local?
+    if @local == true
+      true
+    else # false or nil (not set)
+      false
+    end
+  end
+
+  def to_s
+    dir_sign = if @direction == :in
+                 "i"
+               elsif @direction == :out
+                 (is_local? ? "L" : "o" )
+               else
+                 "?"
+               end
+    # '\' sign at the end of lines is very important here
+    "#{dir_sign}#{dir_sign} #{@timestamp.tv_sec}." \
+    + sprintf("%.6d ", @timestamp.tv_usec) + \
+    "#@enet_src > #@enet_dst #@protocol"
+  end
+end
+
+class Arp < Frame
+  attr_reader :arp_smac, :arp_sip, :arp_tmac, :arp_tip
+  #protected   :arp_smac, :arp_sip, :arp_tmac, :arp_tip
+
+  def initialize(enet_src, enet_dst,
+                 arp_smac, arp_sip, arp_tmac, arp_tip,
+                 arp_op)
+    super(enet_src, enet_dst, "ARP")
+    @arp_smac = arp_smac.mac
+    @arp_sip = arp_sip.ip
+    @arp_tmac = arp_tmac.mac
+    @arp_tip = arp_tip.ip
+    @arp_op = arp_op
+  end
+
+  def self.likeness(type, subtype = nil)
+    (type == "ARP" ? 1 : 0)
+  end
+
+  def self.create(f, subclass_params = [])
+    # Get ARP parameters
+    if f[5] == "ARP" # If f[5] doesn't exist it is nil
+      if f.length >= 11
+        params = [Host.new_mac(f[7]), Host.new_ip(f[8]),
+                  Host.new_mac(f[9]), Host.new_ip(f[10])]
+        # Use arp_op if generic Arp class wanted, otherwise
+        # subclasses specify additional parameters in subclass_params.
+        params << f[6] if self == Arp
+      else
+        raise "ARP packet too short"
+      end
+    else
+      raise "Trying to create Arp class from non-arp frame"
+    end
+
+    super(f, params.concat(subclass_params))
+  end
+
+  # Compares only data contained in physical arp packet -- other attributes
+  # such as timestamp, direction or local are not compared.
+  def ==(f)
+    # Compare only when classes match
+    if self.class == f.class
+      @arp_smac == f.arp_smac && \
+      @enet_dst == f.enet_dst && \
+      @protocol == f.protocol && super(f)
+    else
+      false
+    end
+  end
+
+  def to_s
+    super + " #@arp_op #@arp_smac #@arp_sip #@arp_tmac #@arp_tip"
+  end
+
+  # Need to be invoked after class definition
+  FrameFactory.register(self)
+end
+
+class ArpReq < Arp
+  def initialize(enet_src, enet_dst, arp_smac, arp_sip, arp_tmac, arp_tip)
+    super(enet_src, enet_dst,
+          arp_smac, arp_sip, arp_tmac, arp_tip, "Request")
+  end
+
+  def self.likeness(type, subtype)
+    (type == "ARP" && subtype == "Request" ? 2 : 0)
+  end
+
+  def self.create(f, subclass_params = [])
+    # Get ARP operation
+    if f[6] == "Request" # If f[6] doesn't exist it is nil
+      if f.length >= 7
+        # Do nothing - everything will be done by superclasses
+      else
+        raise "ARP Request packet too short"
+      end
+    else
+      raise "Trying to create Arp Request class from non-request frame"
+    end
+
+    super(f, subclass_params)
+  end
+
+  # Need to be invoked after class definition
+  FrameFactory.register(self)
+end
+
+class ArpReply < Arp
+  def initialize(enet_src, enet_dst, arp_smac, arp_sip, arp_tmac, arp_tip)
+    super(enet_src, enet_dst,
+          arp_smac, arp_sip, arp_tmac, arp_tip, "Reply")
+  end
+
+  def self.likeness(type, subtype)
+    (type == "ARP" && subtype == "Reply" ? 2 : 0)
+  end
+
+  def self.create(f, subclass_params = [])
+    # Get ARP operation
+    if f[6] == "Reply" # If f[6] doesn't exist it is nil
+      if f.length >= 7
+        # Do nothing - everything will be done by superclasses
+      else
+        raise "ARP Reply packet too short"
+      end
+    else
+      raise "Trying to create Arp Reply class from non-reply frame"
+    end
+
+    super(f, subclass_params)
+  end
+
+  # Need to be invoked after class definition
+  FrameFactory.register(self)
+end
+
+class OptParse
+  attr_reader :host_1_ip, :host_1_mac, :host_2_ip, :host_2_mac, \
+              :host_0_ip, :host_0_mac, :host_b_mac, :debug, :raw, :iface
+  def initialize(args)
+    @iface = "eth0"
+    @debug = false
+    @host_b_mac = "40:00:00:00:00:eb" # locally administered mac
+    @raw = false
+    version = "0.0.9"
+
+    opts = OptionParser.new
+    opts.banner = "Usage: #{opts.program_name} [options] " + \
+    "host_1_ip[,host_1_mac] host_2_ip[,host_2_mac]"
+    opts.on("-i interface", String, "default: #@iface") {|val| @iface = val}
+    opts.on("-0", "--host-0 ip,mac", String,
+            "default: ip and mac of the interface") do |val|
+      @host_0_ip, @host_0_mac = val.split(",")
+      if ! @host_0_mac
+        puts "#{opts.program_name}: invalid host_0 string"
+        exit
+      end
+    end
+    opts.on("-b", "--host-b mac", String,
+            "default: #@host_b_mac") do |val|
+      @host_b_mac = val
+    end
+    opts.on("-d", "--debug", "display debug information") {@debug = true}
+    opts.on("-r", "--raw", "display raw results, for debug") {@raw = true}
+    opts.on("--version", "show version") do
+      puts "#{opts.program_name} #{version}"
+      exit
+    end
+    opts.on_tail("-h", "--help", "show this message") do
+      puts opts
+      exit
+    end
+    rest = opts.parse(args)
+    if rest.length == 2
+      @host_1_ip, @host_1_mac = rest[0].split(",")
+      @host_2_ip, @host_2_mac = rest[1].split(",")
+    else
+      puts "#{opts.program_name}: too few arguments, use -h to see help"
+      exit
+    end
+  end
+end
+
+
+# FIXME: Rewrite to make it more object-related
+def perform_tests
+  results = []
+  [TestA1SD, TestA1P, TestA2SD, TestA2P, TestB1, TestB2].each do |cl|
+    test = yield cl
+    results << test.result
+  end
+  results
+end
+
+# FIXME: Bad results for 11?100 and ?11100
+def show_results(rr, show_raw)
+
+  trees = {}
+  trees[1]  = " 0 1 2\n"
+  trees[1] += " | | |\n"
+  trees[1] += " *~*~*"
+
+  trees[2]  = " 1 0 2\n"
+  trees[2] += " | | |\n"
+  trees[2] += " *~*~*"
+
+  trees[3]  = " 0 2 1\n"
+  trees[3] += " | | |\n"
+  trees[3] += " *~*~*"
+
+  trees[4]  = " 0   1 2\n"
+  trees[4] +="  \\ /  |\n"
+  trees[4] += "   *-~-*"
+
+  trees[5]  = " 1   2 0\n"
+  trees[5] +="  \\ /  |\n"
+  trees[5] += "   *-~-*"
+
+  trees[6]  = " 0   2 1\n"
+  trees[6] +="  \\ /  |\n"
+  trees[6] += "   *-~-*"
+
+  trees[7]  = "   1\n"
+  trees[7] += "   |\n"
+  trees[7] += " 0 * 2\n"
+  trees[7] += " | : |\n"
+  trees[7] += " *~*~*"
+
+  trees[8]  = " 0 1 2\n"
+  trees[8] +="  \\|/\n"
+  trees[8] += "   *"
+
+  if show_raw
+    print "Raw results: "
+    rr.each do |a|
+      print(a ? a : "?")
+    end
+    puts
+  end
+
+  r = []
+  if rr[0] == 1
+    # OK, rr[1] is useless
+    # FIXME: there is no need to perform test
+    r << 1
+  elsif rr[0] == 0 && rr[1] == 0
+    # OK
+    r << 0
+  elsif rr[0] == 0 && rr[1] == 1
+    fatal "A1 test results are useless"
+    r << nil
+  elsif rr[0] != nil && rr[1] == nil
+    warning "A1SD passed, A1P not passed -- using A1SD"
+    r << r[0]
+  elsif rr[1] != nil && rr[0] == nil
+    warning "A1P passed, A1SD not passed -- using A1P"
+    r << r[1]
+  elsif rr[0] == nil && rr[1] == nil
+    r << nil
+  else
+    fatal "Results not expected: [0]=#{rr[0]} [1]=#{rr[1]}"
+    r << nil
+  end
+
+  if rr[2] == 1
+    # OK, rr[2] is useless
+    # FIXME: there is no need to perform test
+    r << 1
+  elsif rr[2] == 0 && rr[3] == 0
+    # OK
+    r << 0
+  elsif rr[2] == 0 && rr[3] == 1
+    fatal "A2 test results are useless"
+    r << nil
+  elsif rr[2] != nil && rr[3] == nil
+    warning "A2SD passed, A2P not passed -- using A2SD"
+    r << [2]
+  elsif rr[3] != nil && rr[2] == nil
+    warning "A2P passed, A2SD not passed -- using A2P"
+    r << r[3]
+  elsif rr[2] == nil && rr[3] == nil
+    r << nil
+  else
+    fatal "Results not expected: [2]=#{rr[2]} [3]=#{rr[3]}"
+    r << nil
+  end
+
+  if rr[4] == rr[5]
+    # OK
+    r << rr[4]
+  elsif rr[4] != rr[5] && rr[4] != nil && rr[5] != nil
+    fatal "B1 and B2 results differ, assuming B test not usefull"
+    # FIXME: If B1 != B2 then assuming B was not successfull may be
+    # not enough
+    r << nil
+  elsif rr[4] != nil && rr[5] == nil
+    warning "B1 passed, B2 not passed -- using B1"
+    r << rr[4]
+  elsif rr[5] != nil && rr[4] == nil
+    warning "B2 passed, B1 not passed -- using B2"
+    r << rr[5]
+  elsif rr[4] == nil && rr[5] == nil
+    r << nil
+  else
+    fatal "Results not expected: [4]=#{rr[2]} [5]=#{rr[3]}"
+    r << nil
+  end
+
+  if show_raw
+    print "Computed results: "
+    r.each do |a|
+      print(a ? a : "?")
+    end
+    puts
+  end
+
+  mask = 0
+  r.each_with_index do |v, i|
+    mask += 2**(2-i) if v == nil
+  end
+  cons = 0
+  r.each_with_index do |v, i|
+    cons += v*2**(2-i) if v != nil
+  end
+
+  possible = []
+  (0..7).each do |v|
+    possible << ((v & mask) | cons)
+  end
+
+  possible.uniq!
+
+  layouts = {}
+  layouts[4] = 1
+  layouts[7] = 2
+  layouts[2] = 3
+  layouts[5] = 4
+  layouts[0] = 5
+  layouts[3] = 6
+  layouts[6] = 7
+  layouts[1] = 8
+
+  possible.each do |p|
+    puts trees[layouts[p]]
+    puts
+  end
+end
+
+options = OptParse.new(ARGV)
+EB_DEBUG = options.debug # TODO: make it more elegant
+
+if options.host_0_ip && options.host_0_mac
+  host_0 = Host.new(options.host_0_ip, options.host_0_mac)
+else
+  host_0 = Host.create_self(options.iface)
+end
+host_0.name = "0"
+#
+# FIXME: resolving should be done using:
+# 1. ARP table
+# 2. Ping requests and ARP table (if routing correctly set)
+# 3. Injected ARP Requests (will it stay in ARP table?)
+# Check if ARP Replies to injected requests will stay long in ARP table.
+# If so skip ping tests.
+# FIXME: Allow user to specify host_0 and host_1 mac addresses
+host_1 = Host.new(options.host_1_ip,
+         (options.host_1_mac ? options.host_1_mac : :resolve))
+host_1.name = "1"
+host_2 = Host.new(options.host_2_ip,
+         (options.host_2_mac ? options.host_2_mac : :resolve))
+host_2.name = "2"
+
+PAUSE = Host.new_mac("01:80:c2:00:00:01")
+HOST_B = Host.new_mac(options.host_b_mac)
+
+if host_1.ip == host_2.ip
+  fatal "Host 1 ip == host 2 ip, tests not possible"
+  exit
+end
+
+if host_1.ip == host_0.ip
+  warning "Host 1 ip == host 0 ip, assuming you know what you are doing"
+elsif host_2.ip == host_0.ip
+  warning "Host 2 ip == host 0 ip, assuming you know what you are doing"
+end
+
+if host_1.mac == host_2.mac
+  fatal "Host 1 mac = host 2 mac, tests not possible"
+  exit
+elsif host_1.mac == host_0.mac
+  fatal "Host 1 mac = host 0 mac, tests not possible"
+  exit
+elsif host_2.mac == host_0.mac
+  fatal "Host 2 mac = host 0 mac, tests not possible"
+  exit
+end
+
+if HOST_B.mac == host_0.mac
+  warning "Host b mac = host 0 mac, assuming you know what you are doing"
+elsif HOST_B.mac == host_1.mac
+  fatal "Host 1 mac == host b mac, tests not possible"
+  exit
+elsif HOST_B.mac == host_2.mac
+  fatal "Host 2 mac == host b mac, tests not possible"
+  exit
+end
+
+puts "0: #{host_0}"
+puts "1: #{host_1}"
+puts "2: #{host_2}"
+
+sniffer = Sniffer.create(options.iface)
+injector = Injector.create(options.iface)
+
+results = perform_tests do |test|
+  test.new(host_0, host_1, host_2)
+end
+puts
+
+show_results(results, options.raw)
+
+sniffer.close
+injector.close

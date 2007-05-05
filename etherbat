@@ -1156,13 +1156,14 @@ end
 class OptParse
   attr_reader :host_1_ip, :host_1_mac, :host_2_ip, :host_2_mac, \
               :host_0_ip, :host_0_mac, :host_b_mac, \
-              :debug, :raw, :iface, :repeat_count
+              :debug, :raw, :iface, :repeat_count, :optimistic
   def initialize(args)
     @iface = "eth0"
     @debug = false
     @host_b_mac = "40:00:00:00:00:eb" # locally administered mac
     @repeat_count = 3
     @raw = false
+    @optimistic = false
     version = "0.0.9"
 
     opts = OptionParser.new
@@ -1185,6 +1186,10 @@ class OptParse
             "repeat each test when failed, default: " + \
             "x #@repeat_count") do |val|
       @repeat_count = val
+    end
+    opts.on("-o", "--optimistic",
+            "make optimistic assumptions in analysis") do
+      @optimistic = true
     end
     opts.on("-d", "--debug", "display debug information") {@debug = true}
     opts.on("--raw", "display raw results, for debug") {@raw = true}
@@ -1225,7 +1230,7 @@ def perform_tests(repeat_count, h0, h1, h2)
   results
 end
 
-def show_results(raw, show_raw)
+def show_results(raw, show_raw, optimistic)
 
   trees = {}
   trees[1]  = " 0 1 2\n"
@@ -1271,22 +1276,45 @@ def show_results(raw, show_raw)
   end
 
   r = []
+  # FIXME: A1 and A2 analysis is the identical
   if raw[TestA1SD] == 1
     # OK, A1P is not needed
     # FIXME: there is no need to perform test
-    r << 1
+    r << raw[TestA1SD]
   elsif raw[TestA1SD] == 0 && raw[TestA1P] == 0
     # OK
-    r << 0
+    r << raw[TestA1SD]
   elsif raw[TestA1SD] == 0 && raw[TestA1P] == 1
-    warning "A1 results may be useless, assuming they are invalid"
+    warning "A1 results are opposite, no way to check which is correct"
     r << nil
   elsif raw[TestA1SD] != nil && raw[TestA1P] == nil
-    warning "A1SD passed, A1P not passed -- using A1SD"
-    r << raw[TestA1SD]
+    if raw[TestA1SD] == 1
+      warning "A1SD passed, A1P not passed -- using A1SD"
+      r << raw[TestA1SD]
+    else
+      warning "A1SD = 0, A1P failed, bad result probable, assuming A1 " + \
+              "invalid"
+      if optimistic
+        warning "Optimistic mode, test interpreted as valid"
+        r << raw[TestA1SD]
+      else
+        r << nil
+      end
+    end
   elsif raw[TestA1P] != nil && raw[TestA1SD] == nil
-    warning "A1P passed, A1SD not passed -- using A1P"
-    r << raw[TestA1P]
+    if raw[TestA1P] == 0
+      warning "A1P passed, A1SD not passed -- using A1P"
+      r << raw[TestA1P]
+    else
+      warning "A1P = 1, A1SD failed, bad result probable, assuming A1 " + \
+              "invalid"
+      if optimistic
+        warning "Optimistic mode, test interpreted as valid"
+        r << raw[TestA1P]
+      else
+        r << nil
+      end
+    end
   elsif raw[TestA1SD] == nil && raw[TestA1P] == nil
     r << nil
   else
@@ -1295,21 +1323,43 @@ def show_results(raw, show_raw)
   end
 
   if raw[TestA2SD] == 1
-    # OK, A2SD is not needed
+    # OK, A2P is not needed
     # FIXME: there is no need to perform test
-    r << 1
+    r << raw[TestA2SD]
   elsif raw[TestA2SD] == 0 && raw[TestA2P] == 0
     # OK
-    r << 0
+    r << raw[TestA2SD]
   elsif raw[TestA2SD] == 0 && raw[TestA2P] == 1
-    warning "A2 test results may be useless, assuming they are invalid"
+    warning "A2 results are opposite, no way to check which is correct"
     r << nil
   elsif raw[TestA2SD] != nil && raw[TestA2P] == nil
-    warning "A2SD passed, A2P not passed -- using A2SD"
-    r << raw[TestA2SD]
+    if raw[TestA2SD] == 1
+      warning "A2SD passed, A2P not passed -- using A2SD"
+      r << raw[TestA2SD]
+    else
+      warning "A2SD = 0, A2P failed, bad result probable, assuming A2 " + \
+              "invalid"
+      if optimistic
+        warning "Optimistic mode, test interpreted as valid"
+        r << raw[TestA2SD]
+      else
+        r << nil
+      end
+    end
   elsif raw[TestA2P] != nil && raw[TestA2SD] == nil
-    warning "A2P passed, A2SD not passed -- using A2P"
-    r << raw[TestA2P]
+    if raw[TestA2P] == 0
+      warning "A2P passed, A2SD not passed -- using A2P"
+      r << raw[TestA2P]
+    else
+      warning "A2P = 1, A2SD failed, bad result probable, assuming A2 " + \
+              "invalid"
+      if optimistic
+        warning "Optimistic mode, test interpreted as valid"
+        r << raw[TestA2P]
+      else
+        r << nil
+      end
+    end
   elsif raw[TestA2SD] == nil && raw[TestA2P] == nil
     r << nil
   else
@@ -1456,7 +1506,7 @@ results = perform_tests(options.repeat_count, host_0, host_1, host_2)
 #results[TestB1] = nil
 #results[TestB2] = nil
 
-show_results(results, options.raw)
+show_results(results, options.raw, options.optimistic)
 
 sniffer.close
 injector.close

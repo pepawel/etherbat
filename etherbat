@@ -1225,7 +1225,6 @@ def perform_tests(repeat_count, h0, h1, h2)
   results
 end
 
-# FIXME: Bad results for 11?100 and ?11100
 def show_results(raw, show_raw)
 
   trees = {}
@@ -1280,7 +1279,7 @@ def show_results(raw, show_raw)
     # OK
     r << 0
   elsif raw[TestA1SD] == 0 && raw[TestA1P] == 1
-    warning "A1 results are useless"
+    warning "A1 results may be useless, assuming they are invalid"
     r << nil
   elsif raw[TestA1SD] != nil && raw[TestA1P] == nil
     warning "A1SD passed, A1P not passed -- using A1SD"
@@ -1303,7 +1302,7 @@ def show_results(raw, show_raw)
     # OK
     r << 0
   elsif raw[TestA2SD] == 0 && raw[TestA2P] == 1
-    warning "A2 test results are useless"
+    warning "A2 test results may be useless, assuming they are invalid"
     r << nil
   elsif raw[TestA2SD] != nil && raw[TestA2P] == nil
     warning "A2SD passed, A2P not passed -- using A2SD"
@@ -1447,6 +1446,15 @@ sniffer = Sniffer.create(options.iface)
 injector = Injector.create(options.iface)
 
 results = perform_tests(options.repeat_count, host_0, host_1, host_2)
+
+# Debug custom results
+#results = {}
+#results[TestA1SD] = nil
+#results[TestA1P] = nil
+#results[TestA2SD] = nil
+#results[TestA2P] = nil
+#results[TestB1] = nil
+#results[TestB2] = nil
 
 show_results(results, options.raw)
 

@@ -795,7 +795,7 @@ class Injector < WireProc
   @@injector = nil
 
   def initialize(device_name)
-    super "./injector #{device_name}"
+    super "eb-injector #{device_name}"
   end
 
   def self.create(device_name = nil)
@@ -813,7 +813,7 @@ class Sniffer < WireProc
   @@sniffer = nil
 
   def initialize(device_name)
-    super "./sniffer #{device_name}"
+    super "eb-sniffer #{device_name}"
     @status = :stopped
   end
 

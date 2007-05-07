@@ -1,4 +1,5 @@
 #!/usr/bin/ruby -w
+#
 
 # TODO: optimize creation of object of Frame class and subclassess.
 # Implement Frame.build with user-friendly interface (pass host objects),

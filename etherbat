@@ -1,5 +1,4 @@
 #!/usr/bin/ruby -w
-#
 
 # TODO: optimize creation of object of Frame class and subclassess.
 # Implement Frame.build with user-friendly interface (pass host objects),
@@ -295,17 +294,211 @@ end
 class TestA < TestGeneric
   def perform
     # Prepare frames
-    fix = ArpReq.new(@h0, Host.broadcast, @h0, @h0, Host.null, @hy)
-    # In following case sym == asum
-    fix_reply = ArpReply.new(@hy, @h0, @hy, @hy, @h0, @h0)
-    # FIXME
-    @result = 0
-    finish_test
-    return
+    p1a = ArpReq.new(@h0, Host.broadcast, @h0, @h0, Host.null, @hy)
+    p1a_reply = ArpReply.asym_reply_to(p1a, @hy)
+    p1b = ArpReq.new(@h0, Host.broadcast, @h0, @h0, Host.null, @hx)
+    p1b_reply = ArpReply.asym_reply_to(p1b, @hx)
+    p2 = Frame.new(@hy, @hx, "IP")
+    p3 = ArpReq.new(@h0, Host.broadcast, PAUSE, @h0, Host.null, @hy)
+    p3_asym_reply = ArpReply.asym_reply_to(p3, @hy)
+    p3_sym_reply = ArpReply.sym_reply_to(p3, @hy)
+    p4 = ArpReq.new(@h0, @hx, @hy, @hy, Host.null, @hx)
+    p4_asym_reply = ArpReply.asym_reply_to(p4, @hx)
+    p4_sym_reply = ArpReply.sym_reply_to(p4, @hx)
+    p5 = ArpReq.new(@h0, Host.broadcast, @hy, @h0, Host.null, @hy)
+    p5_asym_reply = ArpReply.asym_reply_to(p5, @hy)
+    p5_sym_reply = ArpReply.sym_reply_to(p5, @hy)
+    p6 = p4
+    p6_asym_reply = p4_asym_reply
+
+    fix = ArpReq.new(@hb, Host.broadcast, @h0, @h0, Host.null, @hy)
+    fix_asym_reply = ArpReply.asym_reply_to(fix, @hy)
+    fix_sym_reply = ArpReply.sym_reply_to(fix, @hy)
 
     test_loop do |frame, state|
       case state
       when :start
+        inject(p1a, :p1a_inject_ack)
+        goto :idle
+      when :p1a_inject_ack
+        set_timer(RTT, :p1a_no_reply)
+        goto :p1a_wait_for_reply
+      when :p1a_wait_for_reply
+        if frame == p1a_reply
+          debug "OK: Reply to p1a"
+          stop_timer
+          fast_goto :p1b_start
+        else
+          finish_test if test_jabber(frame)
+        end
+      when :p1a_no_reply
+        set_flag(:stop)
+        finish_test
+
+      when :p1b_start
+        inject(p1b, :p1b_inject_ack)
+        goto :idle
+      when :p1b_inject_ack
+        set_timer(RTT, :p1b_no_reply)
+        goto :p1b_wait_for_reply
+      when :p1b_wait_for_reply
+        if frame == p1b_reply
+          debug "OK: Reply to p1b"
+          stop_timer
+          fast_goto :p2_start
+        else
+          finish_test if test_jabber(frame)
+        end
+      when :p1b_no_reply
+        set_flag(:stop)
+        finish_test
+
+      when :p2_start
+        inject(p2, :p2_inject_ack)
+        goto :idle
+      when :p2_inject_ack
+        set_timer(OWT, :p3_start)
+        goto :idle
+
+      when :p3_start
+        inject(p3, :p3_inject_ack)
+        goto :idle
+      when :p3_inject_ack
+        set_timer(RTT, :p3_no_reply)
+        goto :p3_wait_for_reply
+      when :p3_wait_for_reply
+        case frame
+        when p3_asym_reply
+          fatal "Asymetric reply to p3. FIXME: maybe can be recovered"
+          stop_timer
+          set_flag(:stop)
+          fast_goto :fix_start
+        when p3_sym_reply
+          fatal "Symetric reply to p3"
+          stop_timer
+          set_flag(:stop)
+          fast_goto :fix_start
+        else
+          fast_goto :fix_start if test_jabber(frame)
+        end
+      when :p3_no_reply
+        debug "OK: No reply to p3"
+        fast_goto :p4_start
+
+      when :p4_start
+        inject(p4, :p4_inject_ack)
+        goto :idle
+      when :p4_inject_ack
+        set_timer(RTT, :p4_no_reply)
+        goto :p4_wait_for_reply
+      when :p4_wait_for_reply
+        case frame
+        when p4_asym_reply
+          debug "OK: Asymetric reply to p4"
+          stop_timer
+          fast_goto :p5_start
+        when p4_sym_reply
+          fatal "Symetric reply to p4"
+          stop_timer
+          set_flag(:stop)
+          fast_goto :fix_start
+        else
+          fast_goto :fix_start if test_jabber(frame)
+        end
+      when :p4_no_reply
+        debug "OK: No reply to p4"
+        @result = 0
+        fast_goto :fix_start
+
+      when :p5_start
+        inject(p5, :p5_inject_ack)
+        goto :idle
+      when :p5_inject_ack
+        set_timer(RTT, :p5_no_reply)
+        goto :p5_wait_for_reply
+      when :p5_wait_for_reply
+        case frame
+        when p5_asym_reply
+          debug "OK: Asymetric reply to p5"
+          stop_timer
+          @result = 0
+          fast_goto :fix_start
+        when p5_sym_reply
+          fatal "Symetric reply to p5"
+          stop_timer
+          set_flag(:stop)
+          fast_goto :fix_start
+        else
+          fast_goto :fix_start if test_jabber(frame)
+        end
+      when :p5_no_reply
+        debug "OK: No reply to p5"
+        fast_goto :p6_start
+
+      when :p6_start
+        inject(p6, :p6_inject_ack)
+        goto :idle
+      when :p6_inject_ack
+        set_timer(RTT, :p6_no_reply)
+        goto :p6_wait_for_reply
+      when :p6_wait_for_reply
+        case frame
+        when p6_asym_reply
+          debug "OK: Asymetric reply to p6"
+          if OPTIMISTIC
+            warning "Optimistic mode used"
+            @result = 1
+          else
+            @result = nil
+          end
+          stop_timer
+          fast_goto :fix_start
+        when p6_sym_reply
+          fatal "Symetric reply to p6"
+          stop_timer
+          set_flag(:stop)
+          fast_goto :fix_start
+        else
+          fast_goto :fix_start if test_jabber(frame)
+        end
+      when :p6_no_reply
+        debug "OK: No reply to p6"
+        @result = 0
+        fast_goto :fix_start
+
+      # fix phase
+      when :fix_start
+        # Fix is invoked from different places, maybe there is
+        # timer running (if so this is bug in test logic!).
+        stop_timer
+        inject(fix, :fix_inject_ack)
+        goto :fix_idle
+      when :fix_idle
+        # nop
+      when :fix_inject_ack
+        debug "OK: fix injected"
+        set_timer(RTT, :fix_no_reply)
+        goto :fix_wait_for_reply
+      when :fix_wait_for_reply
+        case frame
+        when fix_asym_reply
+          debug "OK: Asymetric reply to fix"
+          finish_test
+        when fix_sym_reply
+          fatal "Symetric reply to fix"
+          set_flag(:stop)
+          finish_test
+        else
+          # Do not check other frames for jabber
+          # as it may result in endless loop
+        end
+      when :fix_no_reply
+        fatal "No reply to fix"
+        set_flag(:stop)
+        finish_test
+
+      when :idle
+        fast_goto :fix_start if test_jabber(frame)
       else
         raise "Unknown state: '#{state}'"
       end
@@ -332,21 +525,20 @@ class TestB < TestGeneric
   def perform
     # Prepare frames
     p1 = ArpReq.new(@hb, @hy, @hx, @hx, Host.null, @hy)
-    p1_reply_asym = ArpReply.new(@hy, @hx, @hy, @hy, @hx, @hx)
-    p1_reply_sym = ArpReply.new(@hy, @hb, @hy, @hy, @hb, @hx)
+    p1_reply_asym = ArpReply.asym_reply_to(p1, @hy)
+    p1_reply_sym = ArpReply.sym_reply_to(p1, @hy)
     p2 = Frame.new(@hy, @hb, "IP") # zero sized IP
     p3 = ArpReq.new(@h0, @hx, @hy, @hy, Host.null, @hx)
-    # FIXME: Test symetric replies - are there any variable parts?
     # TODO: Fix ARP tables in case of symetric ARP replies
     # TODO: Does Arp Request fix arp tables, or we need Arp Reply?
-    p3_reply_asym = ArpReply.new(@hx, @hy, @hx, @hx, @hy, @hy)
-    p3_reply_sym = ArpReply.new(@hx, @h0, @hx, @hx, @h0, @hy)
+    p3_reply_asym = ArpReply.asym_reply_to(p3, @hx)
+    p3_reply_sym = ArpReply.sym_reply_to(p3, @hx)
     p3a = ArpReq.new(@h0, @hy, @h0, @h0, Host.null, @hy)
     # In following case sym == asum
-    p3a_reply = ArpReply.new(@hy, @h0, @hy, @hy, @h0, @h0)
+    p3a_reply = ArpReply.asym_reply_to(p3a, @hy)
     fix = ArpReq.new(@h0, Host.broadcast, @h0, @h0, Host.null, @hy)
     # In following case sym == asum
-    fix_reply = ArpReply.new(@hy, @h0, @hy, @hy, @h0, @h0)
+    fix_reply = ArpReply.asym_reply_to(fix, @hy)
 
     test_loop do |frame, state|
       case state
@@ -364,7 +556,7 @@ class TestB < TestGeneric
             set_flag(:stop)
             finish_test # No need to fix switches
           when p1_reply_sym
-            failed "Symetric reply to p1"
+            fatal "Symetric reply to p1"
             set_flag(:stop)
             finish_test # No need to fix switches
           else
@@ -392,7 +584,7 @@ class TestB < TestGeneric
           stop_timer
           fast_goto :p3a_start
         when p3_reply_sym
-          failed "Symetric reply to p3"
+          fatal "Symetric reply to p3"
           set_flag(:stop)
           stop_timer
           fast_goto :fix_start
@@ -413,12 +605,19 @@ class TestB < TestGeneric
       when :p3a_wait_for_reply
         if frame == p3a_reply
           failed "Reply to p3a"
+          # Result caused by jabber with very high probability
+          # Set jabber flag to allow repetiion
+          set_flag(:jabber)
           # Overwrite previously set result
           @result = nil
           # No need to fix switches - p3a reply has already done so
           finish_test
         else
-          fast_goto :fix_start if test_jabber(frame)
+          if test_jabber(frame)
+            # Overwrite previously set result
+            @result = nil
+            fast_goto :fix_start
+          end
         end
       when :p3a_no_reply
         debug "OK: No reply to p3a"
@@ -427,7 +626,7 @@ class TestB < TestGeneric
       # fix phase
       when :fix_start
         # Fix is invoked from different places, maybe there is
-        # timer running (bug this is bug in test logic!).
+        # timer running (if so this is bug in test logic!).
         stop_timer
         inject(fix, :fix_inject_ack)
         goto :fix_idle
@@ -590,8 +789,11 @@ class TestSequence
 
     @test_types.each do |test_class|
       t = nil
-      repeat_count.times do
-        warning "Repeating test #{test_class}, try #{i+1} of #{count}" if t
+      repeat_count.times do |i|
+        if t
+          warning "Repeating test #{test_class}, " + \
+                  "try #{i+1} of #{repeat_count}"
+        end
         t = test_class.new(@host_0, @host_1, @host_2, @host_b)
         t.perform
         @test_seq << t
@@ -640,13 +842,6 @@ class TestSequence
       r << nil
     end
 
-    # FIXME: Remove this debug
-    print "Computed results: "
-    r.each do |a|
-      print(a ? a : "?")
-    end
-    puts
-
     mask = 0
     r.each_with_index do |v, i|
       mask += 2**(2-i) if v == nil
@@ -673,6 +868,7 @@ class TestSequence
     layouts[6] = 7
     layouts[1] = 8
 
+    # FIXME: Rethink following
     trees = {}
     trees[1]  = " 0 1 2\n"
     trees[1] += " | | |\n"
@@ -1090,6 +1286,27 @@ class ArpReply < Arp
     super(f, subclass_params)
   end
 
+  # Creates asymetric ArpReply from reply_sender to ArpReq
+  # specified as req.
+  def self.asym_reply_to(req, reply_sender)
+    arp_smac = Host.new_mac(req.arp_smac)
+     arp_sip = Host.new_ip(req.arp_sip)
+
+    self.new(reply_sender, arp_smac,
+             reply_sender, reply_sender, arp_smac, arp_sip)
+  end
+
+  # Same as asym_reply_to but creates symetric ArpReply
+  # FIXME: Check how symetric reply looks like in details
+  # - is it matched?
+  def self.sym_reply_to(req, reply_sender)
+    enet_src = Host.new_mac(req.enet_src)
+     arp_sip = Host.new_ip(req.arp_sip)
+
+    self.new(reply_sender, enet_src,
+             reply_sender, reply_sender, enet_src, arp_sip)
+  end
+
   # Need to be invoked after class definition
   FrameFactory.register(self)
 end
@@ -1160,7 +1377,7 @@ end
 options = OptParse.new(ARGV)
 # TODO: make it more elegant
 EB_DEBUG = options.debug
-OPTIMISTIC = options.optimistic # FIXME: make use of this option
+OPTIMISTIC = options.optimistic
 
 if options.host_0_ip && options.host_0_mac
   host_0 = Host.new(options.host_0_ip, options.host_0_mac)

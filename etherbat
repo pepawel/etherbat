@@ -42,22 +42,17 @@ public
     ((defined? @finished) && (defined? @result)) ? @result : nil
   end
 
-  # For use only by lowest subclasses, as they guarantee 3 arguments
-  def self.repeat(count, h0, h1, h2)
-    raise "Repeat count < 1 in #{self.class}" if count < 1
-    test_obj = nil
-    count.times do |i|
-      # warning is an instance method, this is class method
-      # so object needed
-      self.warning "Repeating test, try #{i+1} of #{count}" if test_obj
-      test_obj = self.new(h0, h1, h2)
-      break if test_obj.result
-    end
-    test_obj
+  def get_flag(f)
+    @flags = {} if ! defined? @flags
+    @flags[f]
   end
 
 # Methods only for use in test_loop and internally.
 private
+  def set_flag(f)
+    @flags = {} if ! defined? @flags
+    @flags[f] = true
+  end
 
   def failed(text)
     STDERR.puts "test-failed: (#{self.class}) #{text}"
@@ -120,7 +115,7 @@ private
   # same time.
   # When timeout event occur state set by goto is overwritten.
   def set_timer(timeout, state_after_timeout)
-    raise "Can't set timer when injecting frame" if @timeout_type == :inject
+    raise "Can't set timer when injecting frame" if @timeout_type==:inject
     @timeout = timeout
     @timeout_type = :wait
     @timeout_just_set = true
@@ -228,265 +223,130 @@ private
     end
 
     sniffer.stop
-    debug "Sniffer stopped"
+  end
+
+  # FIXME: somehow detect duplicates of sent frames
+  def test_jabber(frame)
+    debug "Testing jabber:"
+    debug "> #{frame}"
+    ret = true
+    if frame.enet_src == @hy.mac && frame.direction == :in
+      failed "y (#{@hy.name}) is jabbering"
+    elsif frame.enet_src == @hy.mac && frame.direction == :out
+      failed "This machine is sending frames with y (#{@hy.name}) src mac"
+    elsif frame.class == ArpReq && frame.arp_tip == @hy.ip && \
+          frame.direction == :in
+      failed "Someone is talking to y (#{@hy.name}), it _will_ reply"
+    elsif frame.class == ArpReq && frame.arp_tip == @hy.ip && \
+          frame.direction == :out
+      failed "This machine is talking to y (#{@hy.name}), it _will_ reply"
+    elsif frame.enet_dst == @hy.mac && frame.direction == :in
+      failed "Someone is talking to y (#{@hy.name}), it _may_ reply"
+    elsif frame.enet_dst == @hy.mac && frame.direction == :out
+      failed "This machine is talking to y (#{@hy.name})"
+    else
+      debug "Not harmful jabber"
+      ret = false
+    end
+    set_flag(:jabber) if ret
+    ret
+  end
+end
+
+class MacResolver < TestGeneric
+  def initialize(h0)
+    @h0 = h0
+  end
+  # Updates mac of given host by resolving it with ARP Request.
+  # If resolving was successfull returns true, false otherwise.
+  def resolve!(host)
+    req = ArpReq.new(@h0, Host.broadcast, @h0, @h0, Host.null, host)
+    success = false
+    test_loop do |frame, state|
+      case state
+      when :start
+        inject(req, :ack)
+        goto :idle
+      when :ack
+        set_timer(RTT, :no_reply)
+        goto :wait_for_reply
+      when :wait_for_reply
+        if frame.class == ArpReply && \
+           frame.enet_dst == @h0.mac && \
+           frame.arp_sip == host.ip && \
+           frame.arp_tmac == @h0.mac && \
+           frame.arp_tip == @h0.ip
+          host.set_mac(frame.arp_smac)
+          success = true
+          finish_test
+        end
+      when :no_reply
+        finish_test
+      when :idle
+        # nop
+      else
+        raise "Unknown state: '#{state}'"
+      end
+    end
+    success
   end
 end
 
 class TestA < TestGeneric
-  def initialize(h0, hx, hy, hy_p2_smac)
-    debug "0: #{h0}"
-    debug "x: #{hx}"
-    debug "y: #{hy}"
-
+  def perform
     # Prepare frames
-    p1 = Frame.new(hy, hx, "IP")  # Zero-sized IP
-    p1_reversed = Frame.new(hx, hy, "IP")
-    p1a = ArpReq.new(h0, hx, hy, hy, Host.null, hx)
-    p1a_reply_asym = ArpReply.new(hx, hy, hx, hx, hy, hy)
-    p1a_reply_sym = ArpReply.new(hx, h0, hx, hx, h0, hy)
-    p2 = ArpReq.new(h0, Host.broadcast, hy_p2_smac, h0, Host.null, hy)
-    p2_reply_asym = ArpReply.new(hy, hy_p2_smac, hy, hy, hy, h0)
-    p2_reply_sym = ArpReply.new(hy, h0, hy, hy, h0, h0)
-    p3 = p1a
-    p3_reply_asym = p1a_reply_asym
-    p3_reply_sym = p1a_reply_sym
-    fix = ArpReq.new(h0, Host.broadcast, h0, h0, Host.null, hy)
+    fix = ArpReq.new(@h0, Host.broadcast, @h0, @h0, Host.null, @hy)
     # In following case sym == asum
-    fix_reply = ArpReply.new(hy, h0, hy, hy, h0, h0)
+    fix_reply = ArpReply.new(@hy, @h0, @hy, @hy, @h0, @h0)
+    # FIXME
+    @result = 0
+    finish_test
+    return
 
     test_loop do |frame, state|
       case state
       when :start
-        inject(p1, :p1_inject_ack)
-        goto :idle
-
-      # p1
-      when :p1_inject_ack
-        debug "OK: p1 injected"
-        set_timer(RTT, :p1_no_reply)
-        goto :p1_wait_for_reply
-      when :p1_wait_for_reply
-        case frame
-        when p1_reversed
-          # Spoofing was successfull
-          debug "OK: Possible reply to p1"
-          stop_timer
-          fast_goto :p1a_start
-        else
-          check_frame = true
-        end
-      when :p1_no_reply
-        # Good - no reply expected
-        fast_goto :p1a_start
-
-      # p1a
-      when :p1a_start
-        inject(p1a, :p1a_inject_ack)
-        goto :idle
-      when :p1a_inject_ack
-        debug "OK: p1a injected"
-        set_timer(RTT, :p1a_no_reply)
-        goto :p1a_wait_for_reply
-      when :p1a_wait_for_reply
-        case frame
-        when p1a_reply_asym
-          debug "OK: Asymetric ARP reply to p1a"
-          stop_timer
-          fast_goto :p2_start
-        when p1a_reply_sym
-          failed "Symetric ARP reply to p1a"
-          stop_timer
-          fast_goto :fix_start
-        else
-          check_frame = true
-        end
-      when :p1a_no_reply
-        failed "No reply to p1a"
-        fast_goto :fix_start
-
-      # p2
-      when :p2_start
-        inject(p2, :p2_inject_ack)
-        goto :idle
-      when :p2_inject_ack
-        debug "OK: p2 injected"
-        set_timer(RTT, :p2_no_reply)
-        goto :p2_wait_for_reply
-      when :p2_wait_for_reply
-        case frame
-        when p2_reply_asym
-          failed "Network shouldn't deliver reply to p2"
-          stop_timer
-          fast_goto :fix_start
-        when p2_reply_sym
-          failed "Symetric ARP reply to p2"
-          stop_timer
-          fast_goto :fix_start
-        else
-          check_frame = true
-        end
-      when :p2_no_reply
-        # Good - no reply expected
-        fast_goto :p3_start
-
-      # p3
-      when :p3_start
-        inject(p3, :p3_inject_ack)
-        goto :idle
-      when :p3_inject_ack
-        debug "OK: p3 injected"
-        set_timer(RTT, :p3_no_reply)
-        goto :p3_wait_for_reply
-      when :p3_wait_for_reply
-        case frame
-        when p3_reply_asym
-          debug "OK: Asymetric ARP reply to p3"
-          stop_timer
-          @result = 1
-          fast_goto :fix_start
-        when p3_reply_sym
-          failed "Symetric ARP reply to p3"
-          stop_timer
-          fast_goto :fix_start
-        else
-          check_frame = true
-        end
-      when :p3_no_reply
-        debug "OK: No reply to p3"
-        @result = 0
-        fast_goto :fix_start
-
-      # fix phase
-      when :fix_start
-        # Fix is invoked from different places, maybe there is
-        # timer running (bug this is bug in test logic!).
-        stop_timer
-        inject(fix, :fix_inject_ack)
-        goto :fix_idle
-      when :fix_idle
-        # nop
-      when :fix_inject_ack
-        debug "OK: fix injected"
-        set_timer(RTT, :fix_no_reply)
-        goto :fix_wait_for_reply
-      when :fix_wait_for_reply
-        case frame
-        when fix_reply
-          debug "OK: ARP reply to fix"
-          finish_test
-        when fix
-          if frame.direction == :in
-            warning "Network generated duplicate of sent fix frame"
-          end
-        else
-          # Do not check other frames as it may result in endless loop
-        end
-      when :fix_no_reply
-        warning "No reply to fix"
-        finish_test
-
-      when :idle
-        check_frame = true
-
       else
         raise "Unknown state: '#{state}'"
-      end
-
-      # If frame requires extra processing do it here
-      if (defined? check_frame) && check_frame != nil
-        check_frame = nil
-        if frame
-          debug "Testing jabber:"
-          debug "> #{frame}"
-          # Detect duplicates
-          # No way to reliably detect p1 duplicates in current framework
-          if (frame.direction == :in) && ([p1a,p2,p3].include?(frame))
-            failed "Network generated duplicate of sent frame"
-            fast_goto :fix_start
-          # Detect jabber
-          elsif frame.enet_src == hy.mac
-            if frame.direction == :in
-              failed "y (#{hy.name}) is jabbering"
-              finish_test # no need to fix switches, y done this
-            else
-              failed "0 is spoofing y (#{hy.name})"
-              fast_goto :fix_start
-            end
-          elsif frame.class == ArpReq && frame.arp_tip == hy.ip
-            if frame.direction == :in
-              failed "Someone is talking to y (#{hy.name}), it _will_ reply"
-              fast_goto :fix_start
-            else
-              failed "0 is talking to y (#{hy.name}), it _will_ reply"
-              fast_goto :fix_start
-            end
-          elsif frame.enet_dst == hy.mac
-            if frame.direction == :in
-              failed "Someone is talking to y (#{hy.name}), it _may_ reply"
-              fast_goto :fix_start
-            else
-              failed "0 is talking to y (#{hy.name})"
-              fast_goto :fix_start
-            end
-          else
-            debug "Not harmful jabber"
-          end
-        else
-          raise "No frame to check in state #{state}"
-        end
       end
     end
   end
 end
 
-class TestA1P < TestA
-  def initialize(h0, h1, h2)
-    super(h0, h1, h2, PAUSE)
+class TestA1 < TestA
+  def initialize(h0, h1, h2, hb)
+    @h0, @hb = h0, hb
+    @hx, @hy = h1, h2
   end
 end
 
-class TestA1SD < TestA
-  def initialize(h0, h1, h2)
-    super(h0, h1, h2, h2)
-  end
-end
-
-class TestA2P < TestA
-  def initialize(h0, h1, h2)
-    super(h0, h2, h1, PAUSE)
-  end
-end
-
-class TestA2SD < TestA
-  def initialize(h0, h1, h2)
-    super(h0, h2, h1, h1)
+class TestA2 < TestA
+  def initialize(h0, h1, h2, hb)
+    @h0, @hb = h0, hb
+    @hx, @hy = h2, h1
   end
 end
 
 # TODO: Create detailed test documentation
 class TestB < TestGeneric
-  def initialize(h0, hx, hy)
-    debug "0: #{h0}"
-    debug "x: #{hx}"
-    debug "y: #{hy}"
-
+  def perform
     # Prepare frames
-    p1 = ArpReq.new(HOST_B, hy, hx, hx, Host.null, hy)
-    p1_reply_asym = ArpReply.new(hy, hx, hy, hy, hx, hx)
-    p1_reply_sym = ArpReply.new(hy, HOST_B, hy, hy, HOST_B, hx)
-    p2 = Frame.new(hy, HOST_B, "IP") # zero sized IP
-    p3 = ArpReq.new(h0, hx, hy, hy, Host.null, hx)
+    p1 = ArpReq.new(@hb, @hy, @hx, @hx, Host.null, @hy)
+    p1_reply_asym = ArpReply.new(@hy, @hx, @hy, @hy, @hx, @hx)
+    p1_reply_sym = ArpReply.new(@hy, @hb, @hy, @hy, @hb, @hx)
+    p2 = Frame.new(@hy, @hb, "IP") # zero sized IP
+    p3 = ArpReq.new(@h0, @hx, @hy, @hy, Host.null, @hx)
     # FIXME: Test symetric replies - are there any variable parts?
     # TODO: Fix ARP tables in case of symetric ARP replies
     # TODO: Does Arp Request fix arp tables, or we need Arp Reply?
-    p3_reply_asym = ArpReply.new(hx, hy, hx, hx, hy, hy)
-    p3_reply_sym = ArpReply.new(hx, h0, hx, hx, h0, hy)
-    p3a = ArpReq.new(h0, hy, h0, h0, Host.null, hy)
+    p3_reply_asym = ArpReply.new(@hx, @hy, @hx, @hx, @hy, @hy)
+    p3_reply_sym = ArpReply.new(@hx, @h0, @hx, @hx, @h0, @hy)
+    p3a = ArpReq.new(@h0, @hy, @h0, @h0, Host.null, @hy)
     # In following case sym == asum
-    p3a_reply = ArpReply.new(hy, h0, hy, hy, h0, h0)
-    fix = ArpReq.new(h0, Host.broadcast, h0, h0, Host.null, hy)
+    p3a_reply = ArpReply.new(@hy, @h0, @hy, @hy, @h0, @h0)
+    fix = ArpReq.new(@h0, Host.broadcast, @h0, @h0, Host.null, @hy)
     # In following case sym == asum
-    fix_reply = ArpReply.new(hy, h0, hy, hy, h0, h0)
+    fix_reply = ArpReply.new(@hy, @h0, @hy, @hy, @h0, @h0)
 
     test_loop do |frame, state|
       case state
@@ -501,12 +361,14 @@ class TestB < TestGeneric
         case frame
           when p1_reply_asym
             failed "Network delivered reply to p1"
+            set_flag(:stop)
             finish_test # No need to fix switches
           when p1_reply_sym
             failed "Symetric reply to p1"
+            set_flag(:stop)
             finish_test # No need to fix switches
           else
-            check_frame = true
+            fast_goto :fix_start if test_jabber(frame)
         end
 
       when :p2_start
@@ -531,10 +393,11 @@ class TestB < TestGeneric
           fast_goto :p3a_start
         when p3_reply_sym
           failed "Symetric reply to p3"
+          set_flag(:stop)
           stop_timer
           fast_goto :fix_start
         else
-          check_frame = true
+          fast_goto :fix_start if test_jabber(frame)
         end
       when :p3_no_reply
         debug "OK: No reply to p3"
@@ -555,7 +418,7 @@ class TestB < TestGeneric
           # No need to fix switches - p3a reply has already done so
           finish_test
         else
-          check_frame = true
+          fast_goto :fix_start if test_jabber(frame)
         end
       when :p3a_no_reply
         debug "OK: No reply to p3a"
@@ -579,91 +442,52 @@ class TestB < TestGeneric
         when fix_reply
           debug "OK: ARP reply to fix"
           finish_test
-        when fix
-          if frame.direction == :in
-            warning "Network generated duplicate of sent fix frame"
-          end
         else
-          # Do not check other frames as it may result in endless loop
+          # Do not check other frames for jabber
+          # as it may result in endless loop
         end
       when :fix_no_reply
-        warning "No reply to fix"
+        fatal "No reply to fix"
+        set_flag(:stop)
         finish_test
 
       when :idle
-        check_frame = true
+        fast_goto :fix_start if test_jabber(frame)
 
       else
         raise "Unknown state: '#{state}'"
-      end
-
-      # If frame requires extra processing do it here
-      if (defined? check_frame) && check_frame != nil
-        check_frame = nil
-        if frame
-          debug "Testing jabber:"
-          debug "> #{frame}"
-          # Detect duplicates
-          # No way to reliably detect p2 duplicates in current framework
-          if (frame.direction == :in) && ([p1,p3,p3a].include?(frame))
-            failed "Network generated duplicate of sent frame"
-            fast_goto :fix_start
-          # Detect jabber
-          elsif frame.enet_src == hy.mac
-            if frame.direction == :in
-              failed "y (#{hy.name}) is jabbering"
-              finish_test # no need to fix switches, y done this
-            else
-              failed "0 is spoofing y (#{hy.name})"
-              fast_goto :fix_start
-            end
-          elsif frame.class == ArpReq && frame.arp_tip == hy.ip
-            if frame.direction == :in
-              failed "Someone is talking to y (#{hy.name}), it _will_ reply"
-              fast_goto :fix_start
-            else
-              failed "0 is talking to y (#{hy.name}), it _will_ reply"
-              fast_goto :fix_start
-            end
-          elsif frame.enet_dst == hy.mac
-            if frame.direction == :in
-              failed "Someone is talking to y (#{hy.name}), it _may_ reply"
-              fast_goto :fix_start
-            else
-              failed "0 is talking to y (#{hy.name})"
-              fast_goto :fix_start
-            end
-          else
-            debug "Not harmful jabber"
-          end
-        else
-          raise "No frame to check in state #{state}"
-        end
       end
     end
   end
 end
 
 class TestB1 < TestB
-  def initialize(h0, h1, h2)
-    super(h0, h1, h2)
+  def initialize(h0, h1, h2, hb)
+    @h0, @hb = h0, hb
+    @hx, @hy = h1, h2
   end
 end
 
 class TestB2 < TestB
-  def initialize(h0, h1, h2)
-    super(h0, h2, h1)
+  def initialize(h0, h1, h2, hb)
+    @h0, @hb = h0, hb
+    @hx, @hy = h2, h1
   end
 end
-
 
 # FIXME: Fix this kludgy mess
 class Host
   attr_reader :ip, :mac
   attr_accessor :name
 
-  def initialize(ip, mac)
-    # Validate and rewrite ip
+  def initialize(raw_ip, raw_mac)
+    set_ip(raw_ip)
+    set_mac(raw_mac)
+    @name = "?"
+  end
+
+  # Validate and rewrite ip
+  def set_ip(ip)
     if ip.nil?
       @ip = nil
     else
@@ -677,17 +501,10 @@ class Host
       end
       @ip.chop! # Remove the last dot
     end
+  end
 
-    # FIXME: do resolving better
-    # After ip validity verified check if there is a need to resolve mac
-    if mac == :resolve
-      @mac = find_in_arp_table(@ip)
-      @mac = arping(@ip) if @mac == nil
-      raise "Can't resolve mac for ip: '#{ip}'" if @mac == nil
-      mac = @mac # Hack
-    end
-
-    # Validate and rewrite mac (even if just resolved)
+  # Validate and rewrite mac
+  def set_mac(mac)
     if mac.nil?
       @mac = nil
     else
@@ -701,7 +518,6 @@ class Host
       end
       @mac.chop! # Remove the last colon
     end
-    @name = "?"
   end
 
   def self.create_self(device)
@@ -754,21 +570,147 @@ class Host
     (@ip == nil ? "ip_unset" : @ip) + " (" + \
     (@mac == nil ? "mac_unset" : @mac) + ")"
   end
+end
 
-  def find_in_arp_table(ip)
-    # FIXME: Interface must not be ignored
-    File.readlines("/proc/net/arp").each do |line|
-      t = line.split
-      return t[3] if (t[0] == ip) && (t[3] != "00:00:00:00:00:00")
-    end
-    nil
+class TestSequence
+  def initialize(host_0, host_1, host_2, host_b)
+    @host_0 = host_0
+    @host_1 = host_1
+    @host_2 = host_2
+    @host_b = host_b
+    @test_types = [TestA1, TestA2, TestB1, TestB2]
+    @tests = {}
+    @test_seq = []
   end
 
-  def arping(ip)
-    # FIXME: Need h0 IP and MAC
-    # FIXME: For now dirty hack - ping and get mac from arp table
-    `ping -c 1 -W 1 #{ip} 2>&1 > /dev/null`
-    find_in_arp_table(ip)
+  # Returns true when entire test sequence was performed successfully,
+  # nil otherwise
+  def perform(repeat_count)
+    raise "Repeat count < 1" if repeat_count < 1
+
+    @test_types.each do |test_class|
+      t = nil
+      repeat_count.times do
+        warning "Repeating test #{test_class}, try #{i+1} of #{count}" if t
+        t = test_class.new(@host_0, @host_1, @host_2, @host_b)
+        t.perform
+        @test_seq << t
+        return nil if t.get_flag(:stop)
+        break if ! t.get_flag(:jabber)
+      end
+      @tests[test_class] = t
+    end
+    true
+  end
+
+  def raw_results
+    t_old = nil
+    str = ""
+    @test_seq.each do |t|
+      str += " " if t.class != t_old.class
+      str += (t.result ? t.result.to_s : '?')
+      t_old = t
+    end
+    str.strip
+  end
+
+  def results
+    r = [@tests[TestA1].result, @tests[TestA2].result]
+
+    if @tests[TestB1].result == @tests[TestB2].result
+      # OK
+      r << @tests[TestB1].result
+    elsif @tests[TestB1].result != @tests[TestB2].result && \
+          @tests[TestB1].result != nil && @tests[TestB2].result != nil
+      warning "B1 and B2 results differ, assuming B test useless"
+      # FIXME: If B1 != B2 then assuming B was not successfull may be
+      # not enough
+      r << nil
+    elsif @tests[TestB1].result != nil && @tests[TestB2].result == nil
+      warning "B1 passed, B2 not passed -- using B1"
+      r << @tests[TestB1].result
+    elsif @tests[TestB2].result != nil && @tests[TestB1].result == nil
+      warning "B2 passed, B1 not passed -- using B2"
+      r << @tests[TestB2].result
+    elsif @tests[TestB1].result == nil && @tests[TestB2].result == nil
+      r << nil
+    else
+      fatal "Results not expected: B1=#{@tests[TestB1].result} " + \
+            "B2=#{@tests[TestB2].result}"
+      r << nil
+    end
+
+    # FIXME: Remove this debug
+    print "Computed results: "
+    r.each do |a|
+      print(a ? a : "?")
+    end
+    puts
+
+    mask = 0
+    r.each_with_index do |v, i|
+      mask += 2**(2-i) if v == nil
+    end
+    cons = 0
+    r.each_with_index do |v, i|
+      cons += v*2**(2-i) if v != nil
+    end
+
+    possible = []
+    (0..7).each do |v|
+      possible << ((v & mask) | cons)
+    end
+
+    possible.uniq!
+
+    layouts = {}
+    layouts[4] = 1
+    layouts[7] = 2
+    layouts[2] = 3
+    layouts[5] = 4
+    layouts[0] = 5
+    layouts[3] = 6
+    layouts[6] = 7
+    layouts[1] = 8
+
+    trees = {}
+    trees[1]  = " 0 1 2\n"
+    trees[1] += " | | |\n"
+    trees[1] += " *~*~*"
+
+    trees[2]  = " 1 0 2\n"
+    trees[2] += " | | |\n"
+    trees[2] += " *~*~*"
+
+    trees[3]  = " 0 2 1\n"
+    trees[3] += " | | |\n"
+    trees[3] += " *~*~*"
+
+    trees[4]  = " 0   1 2\n"
+    trees[4] +="  \\ /  |\n"
+    trees[4] += "   *-~-*"
+
+    trees[5]  = " 1   2 0\n"
+    trees[5] +="  \\ /  |\n"
+    trees[5] += "   *-~-*"
+
+    trees[6]  = " 0   2 1\n"
+    trees[6] +="  \\ /  |\n"
+    trees[6] += "   *-~-*"
+
+    trees[7]  = "   1\n"
+    trees[7] += "   |\n"
+    trees[7] += " 0 * 2\n"
+    trees[7] += " | : |\n"
+    trees[7] += " *~*~*"
+
+    trees[8]  = " 0 1 2\n"
+    trees[8] +="  \\|/\n"
+    trees[8] += "   *"
+
+    ret = []
+    possible.each { |p| ret << trees[layouts[p]] }
+    ret
   end
 end
 
@@ -860,6 +802,7 @@ class Sniffer < WireProc
     rescue Timeout::Error
       raise "Timeout waiting for sniffing stop acknowledge"
     end
+    debug "Sniffing stopped"
 
     @status = :stopped
   end
@@ -871,9 +814,6 @@ class Sniffer < WireProc
   def next_frame
     return FrameFactory.create(@proc.readline)
   end
-end
-
-class Interface
 end
 
 # Must be defined before Frame subclasses
@@ -1213,225 +1153,14 @@ class OptParse
   end
 end
 
-
-# FIXME: Rewrite to make it more object-related
-# Maybe create class TestSequence. Objects of this class could
-# be indexed by test class and would have each method to get
-# test results in chronological order. This class could implement
-# test analysis. It would store all tests objects, also repeated
-# ones - change in Test.repeat required to yield and check its
-# return value. This way repeat will stop after yield returned true,
-# and all test objects would be accessible to TestSequence.
-def perform_tests(repeat_count, h0, h1, h2)
-  results = {}
-  [TestA1SD, TestA1P, TestA2SD, TestA2P, TestB1, TestB2].each do |t|
-    test_obj = t.repeat(repeat_count, h0, h1, h2)
-    results[t] = test_obj.result
-  end
-  results
-end
-
-def show_results(raw, show_raw, optimistic)
-
-  trees = {}
-  trees[1]  = " 0 1 2\n"
-  trees[1] += " | | |\n"
-  trees[1] += " *~*~*"
-
-  trees[2]  = " 1 0 2\n"
-  trees[2] += " | | |\n"
-  trees[2] += " *~*~*"
-
-  trees[3]  = " 0 2 1\n"
-  trees[3] += " | | |\n"
-  trees[3] += " *~*~*"
-
-  trees[4]  = " 0   1 2\n"
-  trees[4] +="  \\ /  |\n"
-  trees[4] += "   *-~-*"
-
-  trees[5]  = " 1   2 0\n"
-  trees[5] +="  \\ /  |\n"
-  trees[5] += "   *-~-*"
-
-  trees[6]  = " 0   2 1\n"
-  trees[6] +="  \\ /  |\n"
-  trees[6] += "   *-~-*"
-
-  trees[7]  = "   1\n"
-  trees[7] += "   |\n"
-  trees[7] += " 0 * 2\n"
-  trees[7] += " | : |\n"
-  trees[7] += " *~*~*"
-
-  trees[8]  = " 0 1 2\n"
-  trees[8] +="  \\|/\n"
-  trees[8] += "   *"
-
-  if show_raw
-    puts "Raw results: "
-    # FIXME: Ugly hack to keep order for now, in future use TestSequence
-    [TestA1SD, TestA1P, TestA2SD, TestA2P, TestB1, TestB2].each do |t|
-      puts "#{t}: #{(raw[t] ? raw[t] : '?')}"
-    end
-  end
-
-  r = []
-  # FIXME: A1 and A2 analysis is the identical
-  if raw[TestA1SD] == 1
-    # OK, A1P is not needed
-    # FIXME: there is no need to perform test
-    r << raw[TestA1SD]
-  elsif raw[TestA1SD] == 0 && raw[TestA1P] == 0
-    # OK
-    r << raw[TestA1SD]
-  elsif raw[TestA1SD] == 0 && raw[TestA1P] == 1
-    warning "A1 results are opposite, no way to check which is correct"
-    r << nil
-  elsif raw[TestA1SD] != nil && raw[TestA1P] == nil
-    if raw[TestA1SD] == 1
-      warning "A1SD passed, A1P not passed -- using A1SD"
-      r << raw[TestA1SD]
-    else
-      warning "A1SD = 0, A1P failed, bad result probable, assuming A1 " + \
-              "invalid"
-      if optimistic
-        warning "Optimistic mode, test interpreted as valid"
-        r << raw[TestA1SD]
-      else
-        r << nil
-      end
-    end
-  elsif raw[TestA1P] != nil && raw[TestA1SD] == nil
-    if raw[TestA1P] == 0
-      warning "A1P passed, A1SD not passed -- using A1P"
-      r << raw[TestA1P]
-    else
-      warning "A1P = 1, A1SD failed, bad result probable, assuming A1 " + \
-              "invalid"
-      if optimistic
-        warning "Optimistic mode, test interpreted as valid"
-        r << raw[TestA1P]
-      else
-        r << nil
-      end
-    end
-  elsif raw[TestA1SD] == nil && raw[TestA1P] == nil
-    r << nil
-  else
-    fatal "Results not expected: A1SD=#{raw[TestA1SD]} A1P=#{raw[TestA1P]}"
-    r << nil
-  end
-
-  if raw[TestA2SD] == 1
-    # OK, A2P is not needed
-    # FIXME: there is no need to perform test
-    r << raw[TestA2SD]
-  elsif raw[TestA2SD] == 0 && raw[TestA2P] == 0
-    # OK
-    r << raw[TestA2SD]
-  elsif raw[TestA2SD] == 0 && raw[TestA2P] == 1
-    warning "A2 results are opposite, no way to check which is correct"
-    r << nil
-  elsif raw[TestA2SD] != nil && raw[TestA2P] == nil
-    if raw[TestA2SD] == 1
-      warning "A2SD passed, A2P not passed -- using A2SD"
-      r << raw[TestA2SD]
-    else
-      warning "A2SD = 0, A2P failed, bad result probable, assuming A2 " + \
-              "invalid"
-      if optimistic
-        warning "Optimistic mode, test interpreted as valid"
-        r << raw[TestA2SD]
-      else
-        r << nil
-      end
-    end
-  elsif raw[TestA2P] != nil && raw[TestA2SD] == nil
-    if raw[TestA2P] == 0
-      warning "A2P passed, A2SD not passed -- using A2P"
-      r << raw[TestA2P]
-    else
-      warning "A2P = 1, A2SD failed, bad result probable, assuming A2 " + \
-              "invalid"
-      if optimistic
-        warning "Optimistic mode, test interpreted as valid"
-        r << raw[TestA2P]
-      else
-        r << nil
-      end
-    end
-  elsif raw[TestA2SD] == nil && raw[TestA2P] == nil
-    r << nil
-  else
-    fatal "Results not expected: A2SD=#{raw[TestA2SD]} A2P=#{raw[TestA2P]}"
-    r << nil
-  end
-
-  if raw[TestB1] == raw[TestB2]
-    # OK
-    r << raw[TestB1]
-  elsif raw[TestB1] != raw[TestB2] && \
-        raw[TestB1] != nil && raw[TestB2] != nil
-    warning "B1 and B2 results differ, assuming B test useless"
-    # FIXME: If B1 != B2 then assuming B was not successfull may be
-    # not enough
-    r << nil
-  elsif raw[TestB1] != nil && raw[TestB2] == nil
-    warning "B1 passed, B2 not passed -- using B1"
-    r << raw[TestB1]
-  elsif raw[TestB2] != nil && raw[TestB1] == nil
-    warning "B2 passed, B1 not passed -- using B2"
-    r << raw[TestB2]
-  elsif raw[TestB1] == nil && raw[TestB2] == nil
-    r << nil
-  else
-    fatal "Results not expected: B1=#{raw[TestB1]} B2=#{raw[TestB2]}"
-    r << nil
-  end
-
-  if show_raw
-    print "Computed results: "
-    r.each do |a|
-      print(a ? a : "?")
-    end
-    puts
-  end
-
-  mask = 0
-  r.each_with_index do |v, i|
-    mask += 2**(2-i) if v == nil
-  end
-  cons = 0
-  r.each_with_index do |v, i|
-    cons += v*2**(2-i) if v != nil
-  end
-
-  possible = []
-  (0..7).each do |v|
-    possible << ((v & mask) | cons)
-  end
-
-  possible.uniq!
-
-  layouts = {}
-  layouts[4] = 1
-  layouts[7] = 2
-  layouts[2] = 3
-  layouts[5] = 4
-  layouts[0] = 5
-  layouts[3] = 6
-  layouts[6] = 7
-  layouts[1] = 8
-
-  possible.each do |p|
-    puts
-    puts trees[layouts[p]]
-  end
-end
+# ------------------------
+# Main program starts here
+# ------------------------
 
 options = OptParse.new(ARGV)
-EB_DEBUG = options.debug # TODO: make it more elegant
+# TODO: make it more elegant
+EB_DEBUG = options.debug
+OPTIMISTIC = options.optimistic # FIXME: make use of this option
 
 if options.host_0_ip && options.host_0_mac
   host_0 = Host.new(options.host_0_ip, options.host_0_mac)
@@ -1439,23 +1168,37 @@ else
   host_0 = Host.create_self(options.iface)
 end
 host_0.name = "0"
-#
-# FIXME: resolving should be done using:
-# 1. ARP table
-# 2. Ping requests and ARP table (if routing correctly set)
-# 3. Injected ARP Requests (will it stay in ARP table?)
-# Check if ARP Replies to injected requests will stay long in ARP table.
-# If so skip ping tests.
-# FIXME: Allow user to specify host_0 and host_1 mac addresses
-host_1 = Host.new(options.host_1_ip,
-         (options.host_1_mac ? options.host_1_mac : :resolve))
+
+# Subprocesses need to be started before mac resolving
+sniffer = Sniffer.create(options.iface)
+injector = Injector.create(options.iface)
+
+host_1 = Host.new_ip(options.host_1_ip)
+if options.host_1_mac
+  host_1.set_mac(options.host_1_mac)
+else
+  ret = MacResolver.new(host_0).resolve!(host_1)
+  if ! ret
+    fatal "Host 1 mac could not be resolved"
+    exit
+  end
+end
 host_1.name = "1"
-host_2 = Host.new(options.host_2_ip,
-         (options.host_2_mac ? options.host_2_mac : :resolve))
+
+host_2 = Host.new_ip(options.host_2_ip)
+if options.host_2_mac
+  host_2.set_mac(options.host_2_mac)
+else
+  ret = MacResolver.new(host_0).resolve!(host_2)
+  if ! ret
+    fatal "Host 2 mac could not be resolved"
+    exit
+  end
+end
 host_2.name = "2"
 
+host_b = Host.new_mac(options.host_b_mac)
 PAUSE = Host.new_mac("01:80:c2:00:00:01")
-HOST_B = Host.new_mac(options.host_b_mac)
 
 if host_1.ip == host_2.ip
   fatal "Host 1 ip == host 2 ip, tests not possible"
@@ -1479,35 +1222,33 @@ elsif host_2.mac == host_0.mac
   exit
 end
 
-if HOST_B.mac == host_0.mac
+if host_b.mac == host_0.mac
   warning "Host b mac = host 0 mac, assuming you know what you are doing"
-elsif HOST_B.mac == host_1.mac
+elsif host_b.mac == host_1.mac
   fatal "Host 1 mac == host b mac, tests not possible"
   exit
-elsif HOST_B.mac == host_2.mac
+elsif host_b.mac == host_2.mac
   fatal "Host 2 mac == host b mac, tests not possible"
   exit
 end
 
-puts "0: #{host_0}"
-puts "1: #{host_1}"
-puts "2: #{host_2}"
+begin
+  puts "0: #{host_0}"
+  puts "1: #{host_1}"
+  puts "2: #{host_2}"
 
-sniffer = Sniffer.create(options.iface)
-injector = Injector.create(options.iface)
-
-results = perform_tests(options.repeat_count, host_0, host_1, host_2)
-
-# Debug custom results
-#results = {}
-#results[TestA1SD] = nil
-#results[TestA1P] = nil
-#results[TestA2SD] = nil
-#results[TestA2P] = nil
-#results[TestB1] = nil
-#results[TestB2] = nil
-
-show_results(results, options.raw, options.optimistic)
+  seq = TestSequence.new(host_0, host_1, host_2, host_b)
+  if seq.perform(options.repeat_count)
+    seq.results.each do |r|
+      puts "\n#{r}"
+    end
+    puts "\nRaw results: #{seq.raw_results}" if options.raw
+  end
+rescue
+  sniffer.close
+  injector.close
+  raise
+end
 
 sniffer.close
 injector.close

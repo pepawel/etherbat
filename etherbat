@@ -1322,7 +1322,7 @@ class OptParse
     @repeat_count = 3
     @raw = false
     @optimistic = false
-    version = "0.0.9"
+    version = "1.0.0"
 
     opts = OptionParser.new
     opts.banner = "Usage: #{opts.program_name} [options] " + \

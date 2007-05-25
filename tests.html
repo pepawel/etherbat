@@ -17,7 +17,7 @@
       <li>Send probe requests and analyse replies.</li>
     </ol>
     <p>
-      Every host is represented by single number or letter. Every test uses two external hosts: <b>x</b> and <b>y</b>. Machine running tests is represented as <b>0</b>. There are also four special hosts: <b>b</b>, <b>PAUSE</b>, <b>null</b> and <b>brd</b>. Host <b>b</b> mac is set to value not used in the network. Host <b>PAUSE</b> mac is set to destination mac of special PAUSE frame. Host <b>null</b> has all-zeroes in ip and mac addresses. Host <b>brd</b> has only 255 (0xff) in ip and mac addresses.
+      Every host is represented by single number or letter. Every test uses two remote hosts: <b>x</b> and <b>y</b>. The machine running tests is represented as <b>0</b>. There are also four special hosts: <b>b</b>, <b>PAUSE</b>, <b>null</b> and <b>brd</b>. Host <b>b</b> MAC is set to value not used in the network. Host <b>PAUSE</b> MAC is set to destination MAC of special PAUSE frame. Host <b>null</b> has all-zeroes in IP and MAC addresses. Host <b>brd</b> has only 255 (0xff) in IP and MAC addresses.
     </p>
     <p>
       Every test step begins with frame injection which is represented in the following way:
@@ -26,36 +26,134 @@
 enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip]</pre>
     <p>
       Where:<br />
-      <i>enet_src, enet_dst</i> are mac addresses in Ethernet frame, <br />
-      <i>protocol</i> is Ethernet protocol type in frame (tests use IP and ARP).
+      <i>enet_src, enet_dst</i> are MAC addresses of injected frame, <br />
+      <i>protocol</i> is Ethernet protocol type of frame (the only protocols used in tests are IP and ARP).
     </p>
     <p>
       Section marked in square brackets is used only when protocol is set to ARP:<br />
       <i>arp_operation</i> - Request or Reply,<br />
-      <i>arp_smac, arp_sip</i> - ARP sender mac and IP,<br />
-      <i>arp_tmac, arp_tip</i> - ARP target mac and IP.
+      <i>arp_smac, arp_sip</i> - ARP sender MAC and IP,<br />
+      <i>arp_tmac, arp_tip</i> - ARP target MAC and IP.
     </p>
     <p>
-      During every test incoming frames are analyzed. If symmetric ARP reply appears all tests are interrupted. In case of jabber (transmission from <b>y</b> host detected) current test is interrupted and repeated.
+      During every test incoming frames are analyzed. If symmetric ARP Reply (destined to MAC address extracted from the header of frame containing associated ARP Request) appears all tests are interrupted as Etherbat relies on asymetric replies (destined to MAC address extracted from ARP Request header). In case of jabber (detected transmission from <b>y</b> host) current test is interrupted and repeated.
+    </p>
+    <p>
+      When test finishes (normally or in case of interruption) <b>fix</b> step is performed to erase incorrect network path and repair arp caches on remote hosts.
     </p>
     <h3>Test A</h3>
     <h4>1a: 0 > brd ARP Request 0 0 null y</h4>
+    <p>
+      Make switches on 0-y path learn y address (needed by step 5).
+    </p>
     <h4>1b: 0 > brd ARP Request 0 0 null x</h4>
+    <p>
+      Make switches on 0-x path learn x address (needed by step 2).
+    </p>
     <h4>2: y > x IP</h4>
+    <p>
+      Create incorrect path to y on 0-x route using frame with spoofed source address.<br />
+      As in previous step switches learned where x is, spoofed frame went directly to x, so only switches on 0-x path was trained incorrectly. In particular, if switch nearest to y is outside 0-x path it has correct path to y.
+    </p>
     <h4>3: 0 > brd ARP Request PAUSE 0 null y</h4>
+    <p>
+      ARP Request to y needs to be broadcasted, as path to y was spoofed in previous step, thus unicast frame would be filtered on nearest switch.<br />
+      ARP Reply will be send by y to special PAUSE address. Frames destined to this address shouldn't be forwarded by switches. So in case reply can be sniffed interrupt all tests as we are in one collision domain with y or there are broken switches in the network.
+    </p>
+    <p>
+      If there was no reply sniffed it means switch nearest to y blocked frame with PAUSE destination address (DA=PAUSE). There are two possible learning bahaviors of a switch when it receives DA=PAUSE frame: it learns its source address (SA) or not. If it learns then path to y will be partially fixed.
+    </p>
     <h4>4: 0 > x ARP Request y y null x</h4>
+    <p>
+      Ask x to send ARP Reply to y.
+    </p>
+    <p>
+      If the reply wasn't sniffed then switch nearest to y is on the 0-x path. Finish with RESULT = 0.
+    </p>
+    <p>
+      If there was a reply then one of the following cases are possible:
+    </p>
+    <ul>
+      <li>y switch doesn't learn SA of DA=PAUSE frames and lays outside of 0-x path</li>
+      <li>y switch doesn't learn SA of DA=PAUSE frames and lays on 0-x path</li>
+      <li>y switch correctly learns SA of DA=PAUSE frames and lays outside of 0-x path</li>
+    </ul>
     <h4>5: 0 > brd ARP Request y 0 null y</h4>
-    <h4>6: same as 4</h4>
+    <p>
+      Ask y to send ARP Reply to self (y) in order to make switch nearest to y learn it's address.
+    </p>
+    <p>
+      Switches vary on handling frames with the same source and destination address (SA=DA). The difference is visible only on first frame and is caused by learning and forwarding order.<br />
+      If the switch learns SA of the frame and then forwards it, the frame is blocked, because it can't be sent to the port on which it was received.<br />
+      If the forwarding process runs before learning then SA=DA frame is relayed via port associated with that address or flooded to all ports. So the first SA=DA frame is relayed via old path or flooded to all ports.
+    </p>
+    <p>
+      If the reply was sniffed it means all switches on the 0-y path are forwarding and then learning. It also means y switch in on 0-x path, as reply arrived to 0 via spoofed path. The RESULT is 0, finish test.
+    </p>
+    <p>
+      If the reply wasn't sniffed then there are following possibilities:
+    </p>
+    <ul>
+      <li>y lays outside of 0-x path, y switch forwards or not SA=DA frames and learns or not SA of DA=PAUSE frames</li>
+      <li>y lays on 0-x path, y switch doesn't learn SA of DA=PAUSE frames, y-0 path was partially fixed, but crossing of y-0 and x-0 paths wasn't</li>
+      <li>y lays on 0-x path, y switch doesn't learn SA of DA=PAUSE frames, y-0 path was partially fixed including crossing of y-0 and x-0 paths</li>
+    </ul>
+    <p>
+      <b>Warning: </b> Windows machines can't send SA=DA frames as they are internally looped back. This and following steps give incorrect results when y is running Windows.
+    </p>
+    <h4>6: 0 > x ARP Request y y null x (same as step 4)</h4>
+    <p>
+      Ask x to send ARP Reply to y.
+    </p>
+    <p>
+      If the reply wasn't sniffed then y lays on 0-x path. Finish test with RESULT = 0.
+    </p>
+    <p>
+      If the reply was sniffed then it is impossible to tell if y lays on or outside of 0-x path. If Etherbat was run in optimistic mode then it is assumed y lays outside of 0-x path and the RESULT = 1. Otherwise RESULT is undefined.
+    </p>
     <h4>fix: b > brd ARP Request 0 0 null y</h4>
     <p>
+      Fix path to y, fix ARP cache of y (entry for 0 was incorrect).<br />
+      Note that frame with ARP Request has spoofed source address. If there is no reply is could mean spoofing on 0-y path is not possible.
     </p>
     <h3>Test B</h3>
     <h4>1: b > y ARP Request x x null y</h4>
+    <p>
+      Request is sent from b address so the local switch (the switch placed nearest to 0) will learn b address - which is needed by next step.<br />
+      Reply will mark y-x path with y address.
+    </p>
+    <p>
+      If reply can be sniffed stop this test. Network shouldn't deliver reply, if it does we are probably in one collision domain with y.
+    </p>
     <h4>2: y > b IP</h4>
+    <p>
+      Make local switch learn y address by sending spoofed frame with y source MAC address.<br />
+      Switch won't relay this frame, as it is destined to b (see previous step). The rest of the network has correct path to y.
+    </p>
     <h4>3: 0 > x ARP Request y y null x</h4>
+    <p>
+      Ask x to send ARP Reply to y.
+    </p>
+    <p>
+      If reply can be sniffed then x is in local switch and RESULT is 1. Otherwise x is located somewhere else and RESULT is 0.
+    </p>
+    <p>
+      Regardless of the result next step needs to be performed for jabber testing.
+    </p>
     <h4>3a: 0 > y ARP Request 0 0 null y</h4>
+    <p>
+      Ask y to send frame to 0. Frame is sent directly to y (UNICAST).
+    </p>
+    <p>
+      If reply can be sniffed it means request reached y. It shouldn't because local switch has y address on host 0 port, so traffic send by 0 to y should be discarded. The only explanation is that y was jabbering and local switch relearned correct y path. Set flag JABBER and unset RESULT.
+    </p>
+    <p>
+      If no reply was sniffed there is a guarantee that y wasn't jabbering.
+    </p>
     <h4>fix: 0 > brd ARP Request 0 0 null y</h4>
     <p>
+      ARP Request needs to be send to broadcast address, because it's the only way to reeach its destination - y (unicast to y won't be relayed thru local switch).<br />
+      Reply to this request will make local switch relearn correct path to y.
     </p>
     <h3>Results interpretation</h3>
     <p>
@@ -68,7 +166,7 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
       <li>Test B2 (Test B with swapped <b>x</b> and <b>y</b> hosts)</li>
     </ol>
     <p>
-      Test B returns the same result no matter if external hosts are swapped or not. However Etherbat runs it twice to test jabbering (jabber test is performed by B1 only for <b>y</b> and by B2 only for <b>x</b>).
+      Test B returns the same result no matter if remote hosts are swapped or not. However Etherbat runs it twice to test jabbering (jabber test is performed by B1 only for <b>y</b> and by B2 only for <b>x</b>).
     </p>
     <p>
       Test sequence results to topology mapping table follows. Hosts were renamed to match Etherbat convention - <b>x</b> is <b>1</b>, <b>y</b> is <b>2</b>. This way user don't need to think about <b>x</b> and <b>y</b> swapping during test sequence, as <b>1</b> and <b>2</b> always mean the same physical hosts.
@@ -87,9 +185,9 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
         <td>0</td>
         <td>0</td>
         <td><pre>
-0 1 2
-| | |
-*~*~*</pre>
+  0 1 2
+  | | |
+  *~*~*</pre>
       </tr>
       <tr>
         <td>2</td>
@@ -97,9 +195,9 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
         <td>1</td>
         <td>1</td>
         <td><pre>
-1 0 2
-| | |
-*~*~*</pre>
+  1 0 2
+  | | |
+  *~*~*</pre>
       </tr>
       <tr>
         <td>3</td>
@@ -107,9 +205,9 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
         <td>1</td>
         <td>0</td>
         <td><pre>
-0 2 1
-| | |
-*~*~*</pre>
+  0 2 1
+  | | |
+  *~*~*</pre>
       </tr>
       <tr>
         <td>4</td>
@@ -117,9 +215,9 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
         <td>0</td>
         <td>1</td>
         <td><pre>
-0   1 2
- \ /  |
-  *-~-*</pre>
+  0   1 2
+   \ /  |
+    *-~-*</pre>
       </tr>
       <tr>
         <td>5</td>
@@ -127,9 +225,9 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
         <td>0</td>
         <td>0</td>
         <td><pre>
-1   2 0
- \ /  |
-  *-~-*</pre>
+  1   2 0
+   \ /  |
+    *-~-*</pre>
       </tr>
       <tr>
         <td>6</td>
@@ -137,9 +235,9 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
         <td>1</td>
         <td>1</td>
         <td><pre>
-0   2 1
- \ /  |
-  *-~-*</pre>
+  0   2 1
+   \ /  |
+    *-~-*</pre>
       </tr>
       <tr>
         <td>7</td>
@@ -147,11 +245,11 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
         <td>1</td>
         <td>0</td>
         <td><pre>
-  1
-  |
-0 * 2
-| : |
-*~*~*</pre>
+    1
+    |
+  0 * 2
+  | : |
+  *~*~*</pre>
       </tr>
       <tr>
         <td>8</td>
@@ -159,9 +257,9 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
         <td>0</td>
         <td>1</td>
         <td><pre>
-0 1 2
- \|/
-  *</pre></td>
+  0 1 2
+   \|/
+    *</pre></td>
       </tr>
     </table>
     <p>

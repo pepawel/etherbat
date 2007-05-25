@@ -27,3 +27,12 @@ pre
 {
   background: rgb(210,210,210);
 }
+table, tr, td {
+  border-width: 1px;
+  border-spacing: 0px;
+  border-color: black;
+  border-style: solid;
+}
+td {
+  padding: 10px;
+}

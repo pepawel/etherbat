@@ -434,6 +434,7 @@ class TestA < TestGeneric
         end
       when :p5_no_reply
         debug "OK: No reply to p5"
+        warning "Test not reliable if host #{@hy.name} is running Windows"
         fast_goto :p6_start
 
       when :p6_start

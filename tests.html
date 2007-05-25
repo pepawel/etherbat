@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+         "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+		<title>Etherbat 1.0.0 tests description</title>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+	</head>
+	<body>
+		<h2>Etherbat 1.0.0 tests description</h2>
+		<h3>Introduction</h3>
+    <p>
+      All tests have two common steps:
+    </p>
+    <ol>
+      <li>Create incorrect path using spoofing.</li>
+      <li>Send probe requests and analyse replies.</li>
+    </ol>
+    <p>
+      Every host is represented by single number or letter. Every test uses two external hosts: <b>x</b> and <b>y</b>. Machine running tests is represented as <b>0</b>. There are also four special hosts: <b>b</b>, <b>PAUSE</b>, <b>null</b> and <b>brd</b>. Host <b>b</b> mac is set to value not used in the network. Host <b>PAUSE</b> mac is set to destination mac of special PAUSE frame. Host <b>null</b> has all-zeroes in ip and mac addresses. Host <b>brd</b> has only 255 (0xff) in ip and mac addresses.
+    </p>
+    <p>
+      Every test step begins with frame injection which is represented in the following way:
+    </p>
+    <pre>
+enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip]</pre>
+    <p>
+      Where:<br />
+      <i>enet_src, enet_dst</i> are mac addresses in Ethernet frame, <br />
+      <i>protocol</i> is Ethernet protocol type in frame (tests use IP and ARP).
+    </p>
+    <p>
+      Section marked in square brackets is used only when protocol is set to ARP:<br />
+      <i>arp_operation</i> - Request or Reply,<br />
+      <i>arp_smac, arp_sip</i> - ARP sender mac and IP,<br />
+      <i>arp_tmac, arp_tip</i> - ARP target mac and IP.
+    </p>
+    <p>
+      During every test incoming frames are analyzed. If symmetric ARP reply appears all tests are interrupted. In case of jabber (transmission from <b>y</b> host detected) current test is interrupted and repeated.
+    </p>
+    <h3>Test A</h3>
+    <h4>1a: 0 > brd ARP Request 0 0 null y</h4>
+    <h4>1b: 0 > brd ARP Request 0 0 null x</h4>
+    <h4>2: y > x IP</h4>
+    <h4>3: 0 > brd ARP Request PAUSE 0 null y</h4>
+    <h4>4: 0 > x ARP Request y y null x</h4>
+    <h4>5: 0 > brd ARP Request y 0 null y</h4>
+    <h4>6: same as 4</h4>
+    <h4>fix: b > brd ARP Request 0 0 null y</h4>
+    <p>
+    </p>
+    <h3>Test B</h3>
+    <h4>1: b > y ARP Request x x null y</h4>
+    <h4>2: y > b IP</h4>
+    <h4>3: 0 > x ARP Request y y null x</h4>
+    <h4>3a: 0 > y ARP Request 0 0 null y</h4>
+    <h4>fix: 0 > brd ARP Request 0 0 null y</h4>
+    <p>
+    </p>
+    <h3>Results interpretation</h3>
+    <p>
+      Etherbat uses following test sequence:
+    </p>
+    <ol>
+      <li>Test A1 (Test A)</li>
+      <li>Test A2 (Test A with swapped <b>x</b> and <b>y</b> hosts)</li>
+      <li>Test B1 (Test B)</li>
+      <li>Test B2 (Test B with swapped <b>x</b> and <b>y</b> hosts)</li>
+    </ol>
+    <p>
+      Test B returns the same result no matter if external hosts are swapped or not. However Etherbat runs it twice to test jabbering (jabber test is performed by B1 only for <b>y</b> and by B2 only for <b>x</b>).
+    </p>
+    <p>
+      Test sequence results to topology mapping table follows. Hosts were renamed to match Etherbat convention - <b>x</b> is <b>1</b>, <b>y</b> is <b>2</b>. This way user don't need to think about <b>x</b> and <b>y</b> swapping during test sequence, as <b>1</b> and <b>2</b> always mean the same physical hosts.
+    </p>
+    <table>
+      <tr>
+        <td>#</td>
+        <td>A1</td>
+        <td>A2</td>
+        <td>B</td>
+        <td>Topology</td>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td>1</td>
+        <td>0</td>
+        <td>0</td>
+        <td><pre>
+0 1 2
+| | |
+*~*~*</pre>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>1</td>
+        <td>1</td>
+        <td>1</td>
+        <td><pre>
+1 0 2
+| | |
+*~*~*</pre>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>0</td>
+        <td>1</td>
+        <td>0</td>
+        <td><pre>
+0 2 1
+| | |
+*~*~*</pre>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>1</td>
+        <td>0</td>
+        <td>1</td>
+        <td><pre>
+0   1 2
+ \ /  |
+  *-~-*</pre>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>0</td>
+        <td>0</td>
+        <td>0</td>
+        <td><pre>
+1   2 0
+ \ /  |
+  *-~-*</pre>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td>0</td>
+        <td>1</td>
+        <td>1</td>
+        <td><pre>
+0   2 1
+ \ /  |
+  *-~-*</pre>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td>1</td>
+        <td>1</td>
+        <td>0</td>
+        <td><pre>
+  1
+  |
+0 * 2
+| : |
+*~*~*</pre>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1</td>
+        <td><pre>
+0 1 2
+ \|/
+  *</pre></td>
+      </tr>
+    </table>
+    <p>
+      Symbols:<br />
+      <b>0 1 2</b> - hosts,<br />
+      <b>*</b> - one switch,<br />
+      <b>| -</b> - direct connections,<br />
+      <b>: ~</b> - 0 or more switches.
+    </p>
+	</body>
+</html>

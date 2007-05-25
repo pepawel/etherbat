@@ -22,3 +22,6 @@ uninstall:
 	rm -f ${BINDIR}/eb-injector
 clean:
 	rm -f eb-injector.o eb-injector eb-sniffer.o eb-sniffer
+
+%.txt: %.html
+	links -dump $< > $@

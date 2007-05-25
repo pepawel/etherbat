@@ -1,0 +1,29 @@
+a
+{
+  color: red;
+}
+p,li,h2
+{
+  font-family: sans-serif;
+}
+h2
+{
+  font-size: 20px;
+}
+p
+{
+  font-size: 15px;
+}
+li
+{
+  font-size: 14px;
+}
+body
+{
+  padding-left: 70px;
+  padding-right: 20%;
+}
+pre
+{
+  background: rgb(210,210,210);
+}

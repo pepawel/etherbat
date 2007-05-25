@@ -332,6 +332,7 @@ class TestA < TestGeneric
           finish_test if test_jabber(frame)
         end
       when :p1a_no_reply
+        fatal "No reply to p1a"
         set_flag(:stop)
         finish_test
 

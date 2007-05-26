@@ -15,11 +15,6 @@ require 'optparse'
 require 'timeout'
 require 'socket'
 
-# Time constants
-OWT = 0.009 # One way time
-REPT = 0.002 # Reply time
-RTT = OWT * 2 + REPT # Round trip time
-
 # Simple debug routine
 def debug(text)
   t = Time.now
@@ -1316,7 +1311,8 @@ end
 class OptParse
   attr_reader :host_1_ip, :host_1_mac, :host_2_ip, :host_2_mac, \
               :host_0_ip, :host_0_mac, :host_b_mac, \
-              :debug, :raw, :iface, :repeat_count, :optimistic
+              :debug, :raw, :iface, :repeat_count, :optimistic, \
+              :one_way_time, :reply_time
   def initialize(args)
     @iface = "eth0"
     @debug = false
@@ -1324,6 +1320,8 @@ class OptParse
     @repeat_count = 3
     @raw = false
     @optimistic = false
+    @one_way_time = 0.009
+    @reply_time = 0.002
     version = "1.0.0"
 
     opts = OptionParser.new
@@ -1347,6 +1345,17 @@ class OptParse
             "x #@repeat_count") do |val|
       @repeat_count = val
     end
+    opts.on("--one-way-time seconds", Float,
+            "time frame traverses net, default: " + \
+            "#@one_way_time") do |val|
+      @one_way_time = val
+    end
+    opts.on("--reply-time seconds", Float,
+            "time host reply to ARP, default: " + \
+            "#@reply_time") do |val|
+      @reply_time = val
+    end
+
     opts.on("-o", "--optimistic",
             "make optimistic assumptions in analysis") do
       @optimistic = true
@@ -1380,6 +1389,12 @@ options = OptParse.new(ARGV)
 # TODO: make it more elegant
 EB_DEBUG = options.debug
 OPTIMISTIC = options.optimistic
+
+# Time constants
+OWT = options.one_way_time # One way time
+REPT = options.reply_time # Reply time
+RTT = OWT * 2 + REPT # Round trip time
+
 
 if options.host_0_ip && options.host_0_mac
   host_0 = Host.new(options.host_0_ip, options.host_0_mac)

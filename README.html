@@ -1,0 +1,310 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+         "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+		<title>Etherbat &mdash; Ethernet topology discovery</title>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+	</head>
+	<body>
+		<h2>Etherbat &mdash; Ethernet topology discovery</h2>
+		<h3>What is Etherbat?</h3>
+    <p>
+      Etherbat performs Ethernet topology discovery between 3 hosts: the machine running Etherbat and two other devices.
+    </p>
+    <ul>
+      <li>Are they in the same switch?</li>
+      <li>Are they in three separate switches?</li>
+      <li>Which host is closer to local machine?</li>
+    <p>
+      &mdash; these are example questions answered by Etherbat.
+    </p>
+
+    </ul>
+    <p>
+      Etherbat could be described as layer 2 equivalent of traceroute.
+    </p>
+    <p>
+      No manageable switches are neccessary.
+    </p>
+    <h3>Use cases</h3>
+    <h4>Locating hosts</h4>
+    <p>
+      Attacker: "Where is that internal database server located?"
+    </p>
+    <p>
+      Admin: "I know there is an internal attack executing right now, but where it originates from?"
+    </p>
+    <h4>Network mapping</h4>
+    <p>
+      Admin: "I want to have detailed map of the network, but I don't want to track every cable physically. The boss doesn't want to buy manageable switches."
+    </p>
+    <p>
+      Auditor: "Let's check if the network documentation describes real network structure."
+    </p>
+    <p>
+      Note: map of the network could be created by repeatedly executing Etherbat with different host combinations and joining gathered results. Etherbat won't do this automatically.
+    </p>
+    <h3>Features</h3>
+    <ul>
+      <li>Ethernet topology discovery between 3 hosts</li>
+      <li>8 different topologies recognized</li>
+      <li>
+        No manageable switches required:
+        <ul>
+          <li>reduces costs for network owner,</li>
+          <li>no need to get access to them for an attacker.</li>
+        </ul>
+      </li>
+      <li>Error detection and correction decreases probability of false result</li>
+      <li>Different switch types supported</li>
+      <li>Mostly clean and (I hope) easy to read OO Ruby code, GPL</li>
+    </ul>
+    <h3>Limitations</h3>
+    <p>
+      <b>Warning!</b> Etherbat was tested only on wired network. It won't work on wireless. Also, it could give incorrect results:
+    </p>
+    <ul>
+      <li>on networks with hubs and/or some (broken) switch types and software bridges (i.e. Linux bridge used by many wireless Access Points)</li>
+      <li>on some enterprise switches due to delayed MAC learning process (may be fixed in future versions by increasing timeouts)</li>
+      <li>when hosts being tested are generating traffic during test and it's not detected by Etherbat</li>
+      <li>in some situations if Windows machines are being tested (in these cases Etherbat displays warning message)</li>
+      <li>probably in other cases due to not yet discovered bugs</li>
+    </ul>
+    <h3>How does it work?</h3>
+    <p>
+      Etherbat uses MAC spoofing to create invalid paths in the network, probes how it changed by injecting specially crafted ARP requests and checks for replies or absence of them. Afterwards it makes the network return to normal state.
+    </p>
+    <p>
+      For more detailed explanation please read the <a href="#documentation">documentation</a>.
+    </p>
+    <h3>Requirements</h3>
+    <ul>
+      <li><a href="http://www.ruby-lang.org/">Ruby</a> (1.8 tested)</li>
+      <li><a href="http://www.packetfactory.net/libnet/">Libnet</a> (1.1.2.1 tested)</li>
+      <li><a href="http://www.tcpdump.org/">Libpcap</a> 0.9.3 or higher. Previous versions <b>will not</b> work as pcap_setdirection() function is needed (as far as I know this function is implemented only on Linux and *BSD)</li>
+      <li>Libnet and Libpcap headers and c toolchain for compilation</li>
+    </ul>
+    <p>
+      Etherbat is written in interpreted language, but needs to launch external processes for frame injection and sniffing. Those are C programs which needs to be compiled.
+    </p>
+    <h3>Download</h3>
+    <p>
+      Etherbat source code is released under <a href="http://www.gnu.org/licenses/gpl.html">GPLv2</a> license and can be downloaded from Launchpad <a href="FIXME">project page</a>.
+    </p>
+    <h3>Compilation and installation</h3>
+    <p>
+      You are advised to check Etherbat tarball integrity against
+      my gpg key, which can be downloaded
+      from <a href="https://secure.cryptonix.org/">here</a>.
+      If the tarball and signature are in the current working directory,
+      issue:
+    </p>
+    <pre>
+   $ gpg --verify etherbat-*.tar.gz.asc</pre>
+    <p>
+      After positive verification, you can extract Etherbat source
+      distribution with:
+    </p>
+    <pre>
+   $ tar zxf etherbat-*.tar.gz</pre>
+    <p>
+      Then enter newly created directory and optionally alter
+      instalation path at the beginning of Makefile.
+      If you want to link sniffer component with libpcap
+      dynamically (you should do this if your distribution ships
+      libpcap as a shared library like Debian 3.1) execute:
+    </p>
+    <pre>
+   $ make</pre>
+    <p>
+      Otherwise, you need to specify <code>libpcap.a</code> file
+      to link statically with. For example on Redhat 9 it would be
+      placed in <code>/usr/lib/libpcap.a</code>, so you should
+      type:
+    </p>
+    <pre>
+   $ PCAP_STATIC=/usr/lib/libpcap.a make</pre>
+    <p>
+      After successful compilation, if you are using sudo issue:
+    </p>
+    <pre>
+   $ sudo make install</pre>
+    <p>
+      or if you are using su:
+    </p>
+    <pre>
+   $ su -c "make install"</pre>
+    <p>
+      Note that the installation is required for program to run
+      correctly. You can uninstall it with:
+    </p>
+    <pre>
+   $ sudo make uninstall</pre>
+    <p>
+      or if you are using su:
+    </p>
+    <pre>
+   $ su -c "make uninstall"</pre>
+    <h3>Usage</h3>
+    <p>
+      Etherbat requires two IP addresses as arguments. It will display how local machine and hosts with those addresses are connected in form of ASCII diagram. Here is example output (for those of you typing ^fscreenshot in Firefox ;-) )
+    </p>
+    <pre>
+# etherbat 10.0.0.1 10.0.0.2
+0: 10.0.0.10 (00:12:1b:d8:a9:86)
+1: 10.0.0.1 (00:0f:18:ce:5f:29)
+2: 10.0.0.2 (00:26:b4:c5:8c:12)
+
+ 1   2 0
+  \ /  |
+   *-~-*</pre>
+    <p>
+      Use <code>-h</code> to see list of possible options.
+    </p>
+    <p>
+      To understand what does all of this ASCII art mean and how to use some options read <a href="tests.html">tests description</a>.
+    </p>
+    <h3>Documentation<a name="documentation">&nbsp;</a></h3>
+    <p>
+      I gave a talk on Etherbat on <a href="http://2007.confidence.org.pl/">Confidence 2007</a> &mdash; you will find the presentation in the <a href="http://www.cryptonix.org/papers.html">papers section</a> of <a href="http://www.cryptonix.org/">my website</a>.
+    </p>
+    <p>
+      Also there is <a href="tests.html">tests documentation</a> with every step explained in details (<code>tests.*</code> in tarball).
+    </p>
+    <p>
+      I've planned to write whitepaper about Ethernet topology discovery, but some time after I had finished Etherbat 1.0.0 I've found <a href="http://www.ieee-icnp.org/2004/papers/9-1.pdf">this document</a>. It describes similiar technique invented by three Microsoft guys (Richard Black, Austin Donnelly and Cedric Fournet) and presented in 2004 on IEEE conference. Reading it will give you almost everything needed to understand how Etherbat works.
+    </p>
+    <p>
+      Recently I've found this technique was implemented in Windows Vista as <a href="http://www.microsoft.com/whdc/Rally/LLTD-spec.mspx">Link Layer Topology Discovery (LLTD)</a> and used in <a href="http://www.microsoft.com/windows/products/windowsvista/features/details/networking.mspx">Network Map</a> feature.
+    </p>
+    <p>
+      When I was writing Etherbat I was unaware of Microsoft researchers work. General idea of LLTD and the technique used by Etherbat is the same, but there are some differences.
+    </p>
+    <p>
+      The main difference is that LLTD is far more complex (as it's distibuted system) and has more features, ie. it provides extensions for QoS tests, integrates anti-DoS functions. And last but not least &mdash; every host being located could provide his own icon to appear on the map (I wonder when LLTD themes will show on the Internet ;-)
+    </p>
+    <table>
+    <tr>
+      <td>LLTD</td>
+      <td>Etherbat</td>
+      <td>Notes</td>
+    </tr>
+    <tr>
+      <td>
+        Etherbat discovers topology between 3 hosts.
+      </td>
+      <td>
+        LLTD maps entire network.
+      </td>
+      <td>
+        It is possible to create application which invokes Etherbat repeatedly for different host combinations and joins results somehow to build the map. Also see <a href="#TODO">TODO</a>.
+      </td>
+    </tr>
+    <tr>
+      <td>LLTD requires all hosts to have <i>responders</i> installed to be placed on the map.</td>
+      <td>Etherbat doesn't need any extra software on remote hosts.</td>
+      <td>LLTD authors consider support for devices without <i>responders</i> (see section 5, paragraph "Uncooperative hosts" of mentioned paper), but as far as I know it's not implemented (yet?).</td>
+    </tr>
+    <tr>
+      <td>
+        LLTD <i>enumerator</i> (the tool coordinating topology discovery) is available for Windows Vista only.
+      </td>
+      <td>
+        Etherbat works on Linux and should work on *BSD systems without modifications (but wasn't tested). Porting to other platforms should be straightforward as majority of code is written in Ruby.
+      </td>
+      <td>
+        &nbsp;
+      </td>
+    </tr>
+    <tr>
+      <td>
+        LLTD <i>enumerator</i> source code is not available.
+      </td>
+      <td>
+        Etherbat code is released under GPL license.
+      </td>
+      <td>
+        LLTD <i>responder</i> source code is available to download.
+      </td>
+    </tr>
+    <tr>
+      <td>
+        LLTD uses special MAC address family which doesn't collide with MAC addresses used in the network &mdash; normal traffic is not affected.
+      </td>
+      <td>
+        Etherbat impersonates host being tested, so it may temporarily cause traffic destined to this host to be lost.
+      </td>
+      <td>
+        &nbsp; 
+      </td>
+    </tr>
+    <tr>
+      <td>
+        LLTD operation is not disturbed by other host transmissions.
+      </td>
+      <td>
+        Etherbat is sensitive to traffic generated by hosts being tested.
+      </td>
+      <td>
+        &nbsp;
+      </td>
+    </tr>
+    <tr>
+      <td>
+        Etherbat doesn't support hubs and wireless.
+      </td>
+      <td>
+        LLTD correctly detect hubs and wireless stuff; topology detected is generally more accurate. Authors presented formal proof of algorithm correctness and completeness.
+      </td>
+      <td>
+        &nbsp;
+      </td>
+    </tr>
+    </table>
+    <h3>TODO<a name="TODO">&nbsp;</a></h3>
+      <ul>
+        <li>HIGH PRIORITY: Three remote hosts mode. It is more resistant to different switch types and better handles Windows machines.</li>
+        <li>One host mode &mdash; fingerprint path from local host to remote machine (taking advantage of different switch types behavior and some other tricks).</li>
+        <li>Support for other asymetric protocols and techniques, i.e. IPv6 (NDP in place of ARP), IPX, ARP+L3/4 (no need for asymetric ARP &mdash; poison ARP cache, send spoofed ping and wait for reply; can be used with TCP or UDP).</li>
+        <li>Are all recognized topologies correct? In particular direct connections on ASCII diagrams may not be direct in case of some switch types.</li>
+        <li>Batch mode to test many host combinations in one invocation (for use by third party mapping apps).</li>
+        <li>Increase performance under high pps (optimize frame handling, use bpf filters to ignore irrelevant frames).</li>
+        <li>Optimize tests to generate less traffic.</li>
+      </ul>
+    <h3>FAQ</h3>
+    <ol>
+      <li>
+        <p>
+          Can I use Etherbat to map remote network which is somewhere in the Internet?
+        </p>
+        <p>
+          Etherbat is a layer 2 tool, uses MAC spoofing and ARP protocol. This kind of stuff won't be forwarded by routers.<br />
+          The only possibility is too use some kind of Ethernet over IP tunneling (note: when the tunnel is not 100% transparent it may impact result).
+        </p>
+      </li>
+      <li>
+        <p>
+          What is there are hubs (Ethernet repeaters) in the network?
+        </p>
+        <p>
+          Depending on hub placement Etherbat will work good, refuse to work or work badly and display incorrect results.
+        </p>
+      </li>
+      <li>
+        <p>
+          Etherbat doesn't display all switches.
+        </p>
+        <p>
+          If there are multiple switches <i>in the line</i> between hosts under test they are displayed as 0, 1 or more switches. See symbols description at the end of <a href="tests.html">tests description</a>.
+        </p>
+      </li>
+    </ol>
+    <h3>Author/contact</h3>
+    <p>
+      This software was written by me, Paweł Pokrywka. You can find my email address as well as my gpg key at:<br />
+      <a href="https://secure.cryptonix.org/">https://secure.cryptonix.org/<a>
+    </p>
+    <h3></h3>
+	</body>
+</html>

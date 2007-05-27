@@ -4,13 +4,15 @@ BINDIR=/usr/local/bin
 GLIB=-lglib-2.0
 CFLAGS=-I/usr/include/glib-2.0 -I/usr/lib/glib-2.0/include -Wall
 LIBNET=-lnet
-PCAP=-lpcap
+ifndef PCAP_STATIC
+	PCAP=-lpcap
+endif
 INSTALL_BIN=install -m 755
 
 all: eb-injector eb-sniffer
 eb-injector: eb-injector.o
 	${CC} ${CFLAGS} ${LIBNET} ${GLIB} $+ -o $@
-eb-sniffer: eb-sniffer.o
+eb-sniffer: eb-sniffer.o ${PCAP_STATIC}
 	${CC} ${CFLAGS} ${PCAP} $+ -o $@
 install: eb-sniffer eb-injector etherbat
 	${INSTALL_BIN} $+ ${BINDIR}

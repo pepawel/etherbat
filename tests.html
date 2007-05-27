@@ -31,9 +31,9 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
     </p>
     <p>
       Section marked in square brackets is used only when protocol is set to ARP:<br />
-      <i>arp_operation</i> - Request or Reply,<br />
-      <i>arp_smac, arp_sip</i> - ARP sender MAC and IP,<br />
-      <i>arp_tmac, arp_tip</i> - ARP target MAC and IP.
+      <i>arp_operation</i> &mdash; Request or Reply,<br />
+      <i>arp_smac, arp_sip</i> &mdash; ARP sender MAC and IP,<br />
+      <i>arp_tmac, arp_tip</i> &mdash; ARP target MAC and IP.
     </p>
     <p>
       During every test incoming frames are analyzed. If symmetric ARP Reply (destined to MAC address extracted from the header of frame containing associated ARP Request) appears all tests are interrupted as Etherbat relies on asymetric replies (destined to MAC address extracted from ARP Request header). In case of jabber (detected transmission from <b>y</b> host) current test is interrupted and repeated.
@@ -119,7 +119,7 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
     <h3>Test B</h3>
     <h4>1: b > y ARP Request x x null y</h4>
     <p>
-      Request is sent from b address so the local switch (the switch placed nearest to 0) will learn b address - which is needed by next step.<br />
+      Request is sent from b address so the local switch (the switch placed nearest to 0) will learn b address &mdash; which is needed by next step.<br />
       Reply will mark y-x path with y address.
     </p>
     <p>
@@ -152,7 +152,7 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
     </p>
     <h4>fix: 0 > brd ARP Request 0 0 null y</h4>
     <p>
-      ARP Request needs to be send to broadcast address, because it's the only way to reeach its destination - y (unicast to y won't be relayed thru local switch).<br />
+      ARP Request needs to be send to broadcast address, because it's the only way to reeach its destination &mdash; y (unicast to y won't be relayed thru local switch).<br />
       Reply to this request will make local switch relearn correct path to y.
     </p>
     <h3>Results interpretation</h3>
@@ -169,7 +169,7 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
       Test B returns the same result no matter if remote hosts are swapped or not. However Etherbat runs it twice to test jabbering (jabber test is performed by B1 only for <b>y</b> and by B2 only for <b>x</b>).
     </p>
     <p>
-      Test sequence results to topology mapping table follows. Hosts were renamed to match Etherbat convention - <b>x</b> is <b>1</b>, <b>y</b> is <b>2</b>. This way user don't need to think about <b>x</b> and <b>y</b> swapping during test sequence, as <b>1</b> and <b>2</b> always mean the same physical hosts.
+      Test sequence results to topology mapping table follows. Hosts were renamed to match Etherbat convention &mdash; <b>x</b> is <b>1</b>, <b>y</b> is <b>2</b>. This way user don't need to think about <b>x</b> and <b>y</b> swapping during test sequence, as <b>1</b> and <b>2</b> always mean the same physical hosts.
     </p>
     <table>
       <tr>
@@ -264,10 +264,10 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
     </table>
     <p>
       Symbols:<br />
-      <b>0 1 2</b> - hosts,<br />
-      <b>*</b> - one switch,<br />
-      <b>| -</b> - direct connections,<br />
-      <b>: ~</b> - 0 or more switches.
+      <b>0 1 2</b> &mdash; hosts,<br />
+      <b>*</b> &mdash; one switch,<br />
+      <b>| -</b> &mdash; direct connections,<br />
+      <b>: ~</b> &mdash; 0 or more switches.
     </p>
 	</body>
 </html>

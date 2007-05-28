@@ -54,4 +54,4 @@ real-dist: doc changelog
 	gpg -ab ${DIST_DIR}.tar.gz || true
 
 upload:
-	scp *.html smok.hdtv.pl:public_html/etherbat.cryptonix.org/
+	scp *.html *.css smok.hdtv.pl:public_html/etherbat.cryptonix.org/

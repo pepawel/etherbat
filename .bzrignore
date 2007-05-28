@@ -1,3 +1,7 @@
 ./novc
 ./eb-sniffer
 ./eb-injector
+./Changelog
+./README.txt
+./tests.txt
+./*.tar.gz*

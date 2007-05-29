@@ -58,9 +58,9 @@
         </ul>
       </li>
       <li>No extra software on remote hosts is neccessary.</li>
-      <li>Error detection and correction decreases probability of false result</li>
-      <li>Different switch types supported</li>
-      <li>Mostly clean and (I hope) easy to read OO Ruby code, GPL</li>
+      <li>Error detection and correction decreases probability of false result.</li>
+      <li>Different switch types supported.</li>
+      <li>Mostly clean and (I hope) easy to read OO Ruby code, GPL.</li>
     </ul>
     <h3>Limitations</h3>
     <p>
@@ -203,10 +203,10 @@
     </tr>
     <tr>
       <td>
-        Etherbat discovers topology between 3 hosts.
+        LLTD maps entire network.
       </td>
       <td>
-        LLTD maps entire network.
+        Etherbat discovers topology between 3 hosts.
       </td>
       <td>
         It is possible to create application which invokes Etherbat repeatedly for different host combinations and joins results somehow to build the map. Also see <a href="#TODO">TODO</a>.
@@ -215,7 +215,7 @@
     <tr>
       <td>LLTD requires all hosts to have <i>responders</i> installed to be placed on the map.</td>
       <td>Etherbat doesn't need any extra software on remote hosts.</td>
-      <td>LLTD authors consider support for devices without <i>responders</i> (see section 5, paragraph "Uncooperative hosts" of mentioned paper), but as far as I know it's not implemented (yet?).</td>
+      <td>LLTD authors consider support for devices without <i>responders</i> (see section 5, paragraph "Uncooperative hosts" of mentioned <a href="http://www.ieee-icnp.org/2004/papers/9-1.pdf">paper</a>), but as far as I know it's not implemented (yet?).</td>
     </tr>
     <tr>
       <td>
@@ -263,10 +263,10 @@
     </tr>
     <tr>
       <td>
-        Etherbat doesn't support hubs and wireless.
+        LLTD correctly detect hubs and wireless stuff; topology detected is generally more accurate. Authors presented formal proof of algorithm correctness and completeness.
       </td>
       <td>
-        LLTD correctly detect hubs and wireless stuff; topology detected is generally more accurate. Authors presented formal proof of algorithm correctness and completeness.
+        Etherbat doesn't support hubs and wireless.
       </td>
       <td>
         &nbsp;
@@ -275,7 +275,7 @@
     </table>
     <h3>TODO<a name="TODO">&nbsp;</a></h3>
       <ul>
-        <li>HIGH PRIORITY: Three remote hosts mode. It is more resistant to different switch types and better handles Windows machines.</li>
+        <li><b>HIGH PRIORITY: Three remote hosts mode. It is more resistant to different switch types and better handles Windows machines.</b></li>
         <li>One host mode &mdash; fingerprint path from local host to remote machine (taking advantage of different switch types behavior and some other tricks).</li>
         <li>Support for other asymetric protocols and techniques, i.e. IPv6 (NDP in place of ARP), IPX, ARP+L3/4 (no need for asymetric ARP &mdash; poison ARP cache, send spoofed ping and wait for reply; can be used with TCP or UDP).</li>
         <li>Are all recognized topologies correct? In particular direct connections on ASCII diagrams may not be direct in case of some switch types.</li>

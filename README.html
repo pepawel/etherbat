@@ -126,7 +126,7 @@
     <pre>
    $ make</pre>
     <p>
-      Otherwise, you need to specify <code>libpcap.a</code> and/or <code>libnet.a</code> files to link statically with. For example if both are places in <code>/usr/lib/</code> you should type:
+      Otherwise, you need to specify <code>libpcap.a</code> and/or <code>libnet.a</code> files to link statically with. For example if both are placed in <code>/usr/lib/</code> you should type:
     </p>
     <pre>
    $ make PCAP_STATIC=/usr/lib/libpcap.a LIBNET_STATIC=/usr/lib/libnet.a</pre>
@@ -270,7 +270,7 @@
       <ul>
         <li><b>HIGH PRIORITY: Three remote hosts mode. It is more resistant to different switch types and better handles Windows machines.</b></li>
         <li>One host mode &mdash; fingerprint path from local host to remote machine (taking advantage of different switch types behavior and some other tricks).</li>
-        <li>Support for other asymetric protocols and techniques, i.e. IPv6 (NDP in place of ARP), IPX, ARP+L3/4 (no need for asymetric ARP &mdash; poison ARP cache, send spoofed ping and wait for reply; can be used with TCP or UDP).</li>
+        <li>Support for other asymmetric protocols and techniques, i.e. IPv6 (NDP in place of ARP), IPX, ARP+L3/4 (no need for asymmetric ARP &mdash; poison ARP cache, send spoofed ping and wait for reply; can be used with TCP or UDP).</li>
         <li>Are all recognized topologies correct? In particular direct connections on ASCII diagrams may not be direct in case of some switch types.</li>
         <li>Batch mode to test many host combinations in one invocation (for use by third party mapping apps).</li>
         <li>Increase performance under high pps (optimize frame handling, use bpf filters to ignore irrelevant frames).</li>

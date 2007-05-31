@@ -36,7 +36,7 @@ enet_src &gt; enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip
       <i>arp_tmac, arp_tip</i> &mdash; ARP target MAC and IP.
     </p>
     <p>
-      During every test incoming frames are analyzed. If symmetric ARP Reply (destined to MAC address extracted from the header of frame containing associated ARP Request) appears all tests are interrupted as Etherbat relies on asymetric replies (destined to MAC address extracted from ARP Request header). In case of jabber (detected transmission from <b>y</b> host) current test is interrupted and repeated.
+      During every test incoming frames are analyzed. If symmetric ARP Reply (destined to MAC address extracted from the header of frame containing associated ARP Request) appears all tests are interrupted as Etherbat relies on asymmetric replies (destined to MAC address extracted from ARP Request header). In case of jabber (detected transmission from <b>y</b> host) current test is interrupted and repeated.
     </p>
     <p>
       When test finishes (normally or in case of interruption) <b>fix</b> step is performed to erase incorrect network path and repair arp caches on remote hosts.

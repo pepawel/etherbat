@@ -1322,7 +1322,7 @@ class OptParse
     @optimistic = false
     @one_way_time = 0.009
     @reply_time = 0.002
-    version = "1.0.0"
+    version = "1.0.1"
 
     opts = OptionParser.new
     opts.banner = "Usage: #{opts.program_name} [options] " + \

@@ -5,7 +5,9 @@ TXT_DOC=README.txt tests.txt
 
 CFLAGS+= -Wall ${shell pkg-config --cflags glib-2.0} ${shell libnet-config --cflags} ${shell libnet-config --defines}
 GLIB=${shell pkg-config --libs glib-2.0}
+ifndef LIBNET_STATIC
 LIBNET=${shell libnet-config --libs}
+endif
 ifndef PCAP_STATIC
 PCAP=-lpcap
 endif
@@ -20,7 +22,7 @@ DIST_DIR=${shell ./etherbat --version | tr " " "-"}
 endif
 
 all: eb-injector eb-sniffer
-eb-injector: eb-injector.o
+eb-injector: eb-injector.o ${LIBNET_STATIC}
 	${CC} ${LIBNET} ${GLIB} $+ -o $@
 eb-sniffer: eb-sniffer.o ${PCAP_STATIC}
 	${CC} ${PCAP} $+ -o $@

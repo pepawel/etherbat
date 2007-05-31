@@ -121,22 +121,15 @@
     <pre>
    $ tar zxf etherbat-*.tar.gz</pre>
     <p>
-      Then enter newly created directory and optionally alter
-      instalation path at the beginning of Makefile.
-      If you want to link sniffer component with libpcap
-      dynamically (you should do this if your distribution ships
-      libpcap as a shared library like Debian 3.1) execute:
+      Then enter newly created directory and optionally alter instalation path at the beginning of Makefile. If you want to link Libnet and Libpcap libraries to be linked dynamically (you should do this if your distribution ships <i>shared</i> versions of these libraries like Debian does) execute:
     </p>
     <pre>
    $ make</pre>
     <p>
-      Otherwise, you need to specify <code>libpcap.a</code> file
-      to link statically with. For example on Redhat 9 it would be
-      placed in <code>/usr/lib/libpcap.a</code>, so you should
-      type:
+      Otherwise, you need to specify <code>libpcap.a</code> and/or <code>libnet.a</code> files to link statically with. For example if both are places in <code>/usr/lib/</code> you should type:
     </p>
     <pre>
-   $ PCAP_STATIC=/usr/lib/libpcap.a make</pre>
+   $ make PCAP_STATIC=/usr/lib/libpcap.a LIBNET_STATIC=/usr/lib/libnet.a</pre>
     <p>
       After successful compilation, if you are using sudo issue:
     </p>
@@ -148,8 +141,7 @@
     <pre>
    $ su -c "make install"</pre>
     <p>
-      Note that the installation is required for program to run
-      correctly. You can uninstall it with:
+      Note that the installation is required for program to run correctly. You can uninstall it with:
     </p>
     <pre>
    $ sudo make uninstall</pre>

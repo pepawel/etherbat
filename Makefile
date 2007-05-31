@@ -3,11 +3,11 @@ BINDIR=/usr/local/bin
 
 TXT_DOC=README.txt tests.txt
 
-GLIB=-lglib-2.0
-CFLAGS=-I/usr/include/glib-2.0 -I/usr/lib/glib-2.0/include -Wall
-LIBNET=-lnet
+CFLAGS+= -Wall ${shell pkg-config --cflags glib-2.0} ${shell libnet-config --cflags} ${shell libnet-config --defines}
+GLIB=${shell pkg-config --libs glib-2.0}
+LIBNET=${shell libnet-config --libs}
 ifndef PCAP_STATIC
-	PCAP=-lpcap
+PCAP=-lpcap
 endif
 INSTALL_BIN=install -m 755
 
@@ -21,9 +21,9 @@ endif
 
 all: eb-injector eb-sniffer
 eb-injector: eb-injector.o
-	${CC} ${CFLAGS} ${LIBNET} ${GLIB} $+ -o $@
+	${CC} ${LIBNET} ${GLIB} $+ -o $@
 eb-sniffer: eb-sniffer.o ${PCAP_STATIC}
-	${CC} ${CFLAGS} ${PCAP} $+ -o $@
+	${CC} ${PCAP} $+ -o $@
 install: eb-sniffer eb-injector etherbat
 	${INSTALL_BIN} $+ ${BINDIR}
 dev-install: eb-sniffer eb-injector etherbat

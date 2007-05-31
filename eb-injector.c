@@ -93,7 +93,7 @@ parse_line(frame_t *f) {
     fprintf(stderr, "%s: invalid source mac address\n", PNAME);
     goto quit;
   }
-  
+
   ret = mac_text2byte(f->enet_dst, tab[4]);
   if (!ret) {
     fprintf(stderr, "%s: invalid destination mac address\n", PNAME);
@@ -198,7 +198,7 @@ inject_frame(libnet_t *l, frame_t *f) {
             PNAME, libnet_geterror(l));
     return 0;
   }
-                                  
+
   if (-1 == libnet_write(l)) {
     fprintf(stderr, "%s: injecting frame failed: %s\n",
             PNAME, libnet_geterror(l));

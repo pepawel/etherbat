@@ -53,7 +53,7 @@ print_frame(pcap_t *p, char dir) {
   char arp_sip_text[24];
   char arp_tmac_text[24];
   char arp_tip_text[24];
-  
+
   /* We don't know if there is any packet to fetch and print.
    * select + bpf + pcap_direction on the same interface goes crazy:
    * when there is frame in one direction, select() set both (in & out)

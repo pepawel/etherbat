@@ -54,6 +54,3 @@ real-dist: doc changelog
 	tar zcf ${DIST_DIR}.tar.gz ${DIST_DIR}
 	rm -rf ${DIST_DIR}
 	gpg -ab ${DIST_DIR}.tar.gz || true
-
-upload:
-	scp *.html *.css smok.hdtv.pl:public_html/etherbat.cryptonix.org/

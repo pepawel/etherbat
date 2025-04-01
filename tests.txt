@@ -1,0 +1,238 @@
+Etherbat 1.0.x tests description
+
+  Introduction
+
+   All tests have two common steps:
+
+    1. Create incorrect path using spoofing.
+    2. Send probe requests and analyse replies.
+
+   Every host is represented by single number or letter. Every test uses two
+   remote hosts: x and y. The machine running tests is represented as 0.
+   There are also four special hosts: b, PAUSE, null and brd. Host b MAC is
+   set to value not used in the network. Host PAUSE MAC is set to destination
+   MAC of special PAUSE frame. Host null has all-zeroes in IP and MAC
+   addresses. Host brd has only 255 (0xff) in IP and MAC addresses.
+
+   Every test step begins with frame injection which is represented in the
+   following way:
+
+ enet_src > enet_dst protocol [arp_operation arp_smac arp_sip arp_tmac arp_tip]
+
+   Where:
+   enet_src, enet_dst are MAC addresses of injected frame,
+   protocol is Ethernet protocol type of frame (the only protocols used in
+   tests are IP and ARP).
+
+   Section marked in square brackets is used only when protocol is set to
+   ARP:
+   arp_operation - Request or Reply,
+   arp_smac, arp_sip - ARP sender MAC and IP,
+   arp_tmac, arp_tip - ARP target MAC and IP.
+
+   During every test incoming frames are analyzed. If symmetric ARP Reply
+   (destined to MAC address extracted from the header of frame containing
+   associated ARP Request) appears all tests are interrupted as Etherbat
+   relies on asymmetric replies (destined to MAC address extracted from ARP
+   Request header). In case of jabber (detected transmission from y host)
+   current test is interrupted and repeated.
+
+   When test finishes (normally or in case of interruption) fix step is
+   performed to erase incorrect network path and repair arp caches on remote
+   hosts.
+
+  Test A
+
+    1a: 0 > brd ARP Request 0 0 null y
+
+   Make switches on 0-y path learn y address (needed by step 5).
+
+    1b: 0 > brd ARP Request 0 0 null x
+
+   Make switches on 0-x path learn x address (needed by step 2).
+
+    2: y > x IP
+
+   Create incorrect path to y on 0-x route using frame with spoofed source
+   address.
+   As in previous step switches learned where x is, spoofed frame went
+   directly to x, so only switches on 0-x path was trained incorrectly. In
+   particular, if switch nearest to y is outside 0-x path it has correct path
+   to y.
+
+    3: 0 > brd ARP Request PAUSE 0 null y
+
+   ARP Request to y needs to be broadcasted, as path to y was spoofed in
+   previous step, thus unicast frame would be filtered on nearest switch.
+   ARP Reply will be send by y to special PAUSE address. Frames destined to
+   this address shouldn't be forwarded by switches. So in case reply can be
+   sniffed interrupt all tests as we are in one collision domain with y or
+   there are broken switches in the network.
+
+   If there was no reply sniffed it means switch nearest to y blocked frame
+   with PAUSE destination address (DA=PAUSE). There are two possible learning
+   bahaviors of a switch when it receives DA=PAUSE frame: it learns its
+   source address (SA) or not. If it learns then path to y will be partially
+   fixed.
+
+    4: 0 > x ARP Request y y null x
+
+   Ask x to send ARP Reply to y.
+
+   If the reply wasn't sniffed then switch nearest to y is on the 0-x path.
+   Finish with RESULT = 0.
+
+   If there was a reply then one of the following cases are possible:
+
+     * y switch doesn't learn SA of DA=PAUSE frames and lays outside of 0-x
+       path
+     * y switch doesn't learn SA of DA=PAUSE frames and lays on 0-x path
+     * y switch correctly learns SA of DA=PAUSE frames and lays outside of
+       0-x path
+
+    5: 0 > brd ARP Request y 0 null y
+
+   Ask y to send ARP Reply to self (y) in order to make switch nearest to y
+   learn it's address.
+
+   Switches vary on handling frames with the same source and destination
+   address (SA=DA). The difference is visible only on first frame and is
+   caused by learning and forwarding order.
+   If the switch learns SA of the frame and then forwards it, the frame is
+   blocked, because it can't be sent to the port on which it was received.
+   If the forwarding process runs before learning then SA=DA frame is relayed
+   via port associated with that address or flooded to all ports. So the
+   first SA=DA frame is relayed via old path or flooded to all ports.
+
+   If the reply was sniffed it means all switches on the 0-y path are
+   forwarding and then learning. It also means y switch in on 0-x path, as
+   reply arrived to 0 via spoofed path. The RESULT is 0, finish test.
+
+   If the reply wasn't sniffed then there are following possibilities:
+
+     * y lays outside of 0-x path, y switch forwards or not SA=DA frames and
+       learns or not SA of DA=PAUSE frames
+     * y lays on 0-x path, y switch doesn't learn SA of DA=PAUSE frames, y-0
+       path was partially fixed, but crossing of y-0 and x-0 paths wasn't
+     * y lays on 0-x path, y switch doesn't learn SA of DA=PAUSE frames, y-0
+       path was partially fixed including crossing of y-0 and x-0 paths
+
+   Warning: Windows machines can't send SA=DA frames as they are internally
+   looped back. This and following steps give incorrect results when y is
+   running Windows.
+
+    6: 0 > x ARP Request y y null x (same as step 4)
+
+   Ask x to send ARP Reply to y.
+
+   If the reply wasn't sniffed then y lays on 0-x path. Finish test with
+   RESULT = 0.
+
+   If the reply was sniffed then it is impossible to tell if y lays on or
+   outside of 0-x path. If Etherbat was run in optimistic mode then it is
+   assumed y lays outside of 0-x path and the RESULT = 1. Otherwise RESULT is
+   undefined.
+
+    fix: b > brd ARP Request 0 0 null y
+
+   Fix path to y, fix ARP cache of y (entry for 0 was incorrect).
+   Note that frame with ARP Request has spoofed source address. If there is
+   no reply is could mean spoofing on 0-y path is not possible.
+
+  Test B
+
+    1: b > y ARP Request x x null y
+
+   Request is sent from b address so the local switch (the switch placed
+   nearest to 0) will learn b address - which is needed by next step.
+   Reply will mark y-x path with y address.
+
+   If reply can be sniffed stop this test. Network shouldn't deliver reply,
+   if it does we are probably in one collision domain with y.
+
+    2: y > b IP
+
+   Make local switch learn y address by sending spoofed frame with y source
+   MAC address.
+   Switch won't relay this frame, as it is destined to b (see previous step).
+   The rest of the network has correct path to y.
+
+    3: 0 > x ARP Request y y null x
+
+   Ask x to send ARP Reply to y.
+
+   If reply can be sniffed then x is in local switch and RESULT is 1.
+   Otherwise x is located somewhere else and RESULT is 0.
+
+   Regardless of the result next step needs to be performed for jabber
+   testing.
+
+    3a: 0 > y ARP Request 0 0 null y
+
+   Ask y to send frame to 0. Frame is sent directly to y (UNICAST).
+
+   If reply can be sniffed it means request reached y. It shouldn't because
+   local switch has y address on host 0 port, so traffic send by 0 to y
+   should be discarded. The only explanation is that y was jabbering and
+   local switch relearned correct y path. Set flag JABBER and unset RESULT.
+
+   If no reply was sniffed there is a guarantee that y wasn't jabbering.
+
+    fix: 0 > brd ARP Request 0 0 null y
+
+   ARP Request needs to be send to broadcast address, because it's the only
+   way to reeach its destination - y (unicast to y won't be relayed thru
+   local switch).
+   Reply to this request will make local switch relearn correct path to y.
+
+  Results interpretation
+
+   Etherbat uses following test sequence:
+
+    1. Test A1 (Test A)
+    2. Test A2 (Test A with swapped x and y hosts)
+    3. Test B1 (Test B)
+    4. Test B2 (Test B with swapped x and y hosts)
+
+   Test B returns the same result no matter if remote hosts are swapped or
+   not. However Etherbat runs it twice to test jabbering (jabber test is
+   performed by B1 only for y and by B2 only for x).
+
+   Test sequence results to topology mapping table follows. Hosts were
+   renamed to match Etherbat convention - x is 1, y is 2. This way user don't
+   need to think about x and y swapping during test sequence, as 1 and 2
+   always mean the same physical hosts.
+
+   # A1 A2 B Topology  
+               0 1 2   
+   1 1  0  0   | | |   
+               *~*~*   
+               1 0 2   
+   2 1  1  1   | | |   
+               *~*~*   
+               0 2 1   
+   3 0  1  0   | | |   
+               *~*~*   
+               0   1 2 
+   4 1  0  1    \ /  | 
+                 *-~-* 
+               1   2 0 
+   5 0  0  0    \ /  | 
+                 *-~-* 
+               0   2 1 
+   6 0  1  1    \ /  | 
+                 *-~-* 
+                 1     
+                 |     
+   7 1  1  0   0 * 2   
+               | : |   
+               *~*~*   
+               0 1 2   
+   8 0  0  1    \|/    
+                 *     
+
+   Symbols:
+   0 1 2 - hosts,
+   * - one switch,
+   | - - direct connections,
+   : ~ - 0 or more switches.

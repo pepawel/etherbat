@@ -9,7 +9,7 @@
 	</head>
 	<body>
 		<h2>Etherbat &mdash; Ethernet topology discovery</h2>
-		<h3>What is <a href="http://www.cryptonix.org/projects/etherbat/">Etherbat</a>?</h3>
+		<h3>What is Etherbat?</h3>
     <p>
       Etherbat performs Ethernet topology discovery between 3 hosts: the machine running Etherbat and two other devices.
     </p>
@@ -77,9 +77,6 @@
     <p>
       Etherbat uses MAC spoofing to create invalid paths in the network, probes how it changed by injecting specially crafted ARP requests and checks for replies or absence of them. Afterwards it makes the network return to normal state.
     </p>
-    <p>
-      For more detailed explanation please read the <a href="#documentation">documentation</a>.
-    </p>
     <h3>Requirements</h3>
     <ul>
       <li><a href="http://www.ruby-lang.org/">Ruby</a> (1.8.4 tested)</li>
@@ -91,37 +88,12 @@
     <p>
       Etherbat is written in interpreted language, but needs to launch external processes for frame injection and sniffing. Those are C programs which needs to be compiled.
     </p>
-    <h3>Download</h3>
-    <p>
-    <p>
-      Etherbat releases can be downloaded from <a href="https://launchpad.net/etherbat/+download">Launchpad project page</a>.
-    </p>
-    <p>
-      There is also the <a href="https://code.launchpad.net/etherbat/">Bazaar repository</a>. To get the latest version of Etherbat type:
-    </p>
-    <pre>
-   $ bzr branch http://bazaar.launchpad.net/~launchpad-cryptonix/etherbat/trunk</pre>
     <p>
       Etherbat source code is released under the terms of <a href="http://www.gnu.org/licenses/gpl.html">GPLv2</a> license.
     </p>
     <h3>Compilation and installation</h3>
     <p>
-      You are advised to check Etherbat tarball integrity against
-      my gpg key, which can be downloaded
-      from <a href="https://secure.cryptonix.org/">here</a>.
-      If the tarball and signature are in the current working directory,
-      issue:
-    </p>
-    <pre>
-   $ gpg --verify etherbat-*.tar.gz.asc</pre>
-    <p>
-      After positive verification, you can extract Etherbat source
-      distribution with:
-    </p>
-    <pre>
-   $ tar zxf etherbat-*.tar.gz</pre>
-    <p>
-      Then enter newly created directory and optionally alter instalation path at the beginning of Makefile. If you want to link Libnet and Libpcap libraries to be linked dynamically (you should do this if your distribution ships <i>shared</i> versions of these libraries like Debian does) execute:
+      Optionally alter instalation path at the beginning of Makefile. If you want to link Libnet and Libpcap libraries to be linked dynamically (you should do this if your distribution ships <i>shared</i> versions of these libraries like Debian does) execute:
     </p>
     <pre>
    $ make</pre>
@@ -169,13 +141,7 @@
     <p>
       To understand what does all of this ASCII art mean and how to use some options read <a href="tests.html">tests description</a>.
     </p>
-    <h3>Documentation<a name="documentation">&nbsp;</a></h3>
-    <p>
-      I gave a talk on Etherbat on <a href="http://2007.confidence.org.pl/">Confidence 2007</a> &mdash; you will find the presentation in the <a href="http://www.cryptonix.org/papers.html">papers section</a> of <a href="http://www.cryptonix.org/">my website</a>.
-    </p>
-    <p>
-      Also there is <a href="tests.html">tests documentation</a> with every step explained in details (<code>tests.*</code> in tarball).
-    </p>
+    <h3>LLTD</h3>
     <p>
       I've planned to write whitepaper about Ethernet topology discovery, but some time after I had finished Etherbat 1.0.0 I've found <a href="http://www.ieee-icnp.org/2004/papers/9-1.pdf">this document</a>. It describes similiar technique invented by three Microsoft guys (Richard Black, Austin Donnelly and Cedric Fournet) and presented in 2004 on IEEE conference. Reading it will give you almost everything needed to understand how Etherbat works.
     </p>
@@ -240,7 +206,7 @@
         Etherbat impersonates host being tested, so it may temporarily cause traffic destined to this host to be lost.
       </td>
       <td>
-        &nbsp; 
+        &nbsp;
       </td>
     </tr>
     <tr>
@@ -306,8 +272,8 @@
     </ol>
     <h3>Author/contact</h3>
     <p>
-      This software was written by me, Paweł Pokrywka. You can find my email address as well as my gpg key at:<br />
-      <a href="https://secure.cryptonix.org/">https://secure.cryptonix.org/<a>
+      This software was written by me, Paweł Pokrywka. You can find my email address at:<br />
+      <a href="https://blog.pawelpokrywka.com">https://blog.pawelpokrywka.com<a>
     </p>
     <h3></h3>
 	</body>

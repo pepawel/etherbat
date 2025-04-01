@@ -1,4 +1,4 @@
-Etherbat - Ethernet topology discovery
+Etherbat — Ethernet topology discovery
 
   What is Etherbat?
 
@@ -9,7 +9,7 @@ Etherbat - Ethernet topology discovery
      * Are they in three separate switches?
      * Which host is closer to local machine?
 
-       - these are example questions answered by Etherbat.
+       — these are example questions answered by Etherbat.
 
    Etherbat could be described as layer 2 equivalent of traceroute.
 
@@ -71,15 +71,14 @@ Etherbat - Ethernet topology discovery
    replies or absence of them. Afterwards it makes the network return to
    normal state.
 
-   For more detailed explanation please read the documentation.
-
   Requirements
 
      * Ruby (1.8.4 tested)
      * Libnet (1.1.2.1 tested)
-     * Libpcap 0.9.3 or higher. Previous versions will not work as
+     * Libpcap 0.9.3 - 0.9.8. Previous versions will not work as
        pcap_setdirection() function is needed (as far as I know this function
-       is implemented only on Linux and *BSD)
+       is implemented only on Linux and *BSD). Version 1.0.0 has a bug which
+       causes Etherbat to work incorrectly.
      * Glib 2.0 (2.12.4 tested)
      * Libnet, Libpcap and Glib headers and c toolchain for compilation
 
@@ -87,35 +86,14 @@ Etherbat - Ethernet topology discovery
    processes for frame injection and sniffing. Those are C programs which
    needs to be compiled.
 
-  Download
-
-   Etherbat releases can be downloaded from Launchpad project page.
-
-   There is also the Bazaar repository. To get the latest version of Etherbat
-   type:
-
-    $ bzr branch http://bazaar.launchpad.net/~launchpad-cryptonix/etherbat/trunk
-
    Etherbat source code is released under the terms of GPLv2 license.
 
   Compilation and installation
 
-   You are advised to check Etherbat tarball integrity against my gpg key,
-   which can be downloaded from here. If the tarball and signature are in the
-   current working directory, issue:
-
-    $ gpg --verify etherbat-*.tar.gz.asc
-
-   After positive verification, you can extract Etherbat source distribution
-   with:
-
-    $ tar zxf etherbat-*.tar.gz
-
-   Then enter newly created directory and optionally alter instalation path
-   at the beginning of Makefile. If you want to link Libnet and Libpcap
-   libraries to be linked dynamically (you should do this if your
-   distribution ships shared versions of these libraries like Debian does)
-   execute:
+   Optionally alter instalation path at the beginning of Makefile. If you
+   want to link Libnet and Libpcap libraries to be linked dynamically (you
+   should do this if your distribution ships shared versions of these
+   libraries like Debian does) execute:
 
     $ make
 
@@ -163,13 +141,7 @@ Etherbat - Ethernet topology discovery
    To understand what does all of this ASCII art mean and how to use some
    options read tests description.
 
-  Documentation 
-
-   I gave a talk on Etherbat on Confidence 2007 - you will find the
-   presentation in the papers section of my website.
-
-   Also there is tests documentation with every step explained in details
-   (tests.* in tarball).
+  LLTD
 
    I've planned to write whitepaper about Ethernet topology discovery, but
    some time after I had finished Etherbat 1.0.0 I've found this document. It
@@ -187,7 +159,7 @@ Etherbat - Ethernet topology discovery
 
    The main difference is that LLTD is far more complex (as it's distibuted
    system) and has more features, ie. it provides extensions for QoS tests,
-   integrates anti-DoS functions. And last but not least - every host being
+   integrates anti-DoS functions. And last but not least — every host being
    located could provide his own icon to appear on the map (I wonder when
    LLTD themes will show on the Internet ;-)
 
@@ -226,7 +198,7 @@ Etherbat - Ethernet topology discovery
    address family which    Etherbat impersonates host 
    doesn't collide with    being tested, so it may    
    MAC addresses used in   temporarily cause traffic   
-   the network - normal    destined to this host to   
+   the network — normal    destined to this host to   
    traffic is not          be lost.
    affected.               
    LLTD operation is not   Etherbat is sensitive to                           
@@ -246,11 +218,11 @@ Etherbat - Ethernet topology discovery
 
      * HIGH PRIORITY: Three remote hosts mode. It is more resistant to
        different switch types and better handles Windows machines.
-     * One host mode - fingerprint path from local host to remote machine
+     * One host mode — fingerprint path from local host to remote machine
        (taking advantage of different switch types behavior and some other
        tricks).
      * Support for other asymmetric protocols and techniques, i.e. IPv6 (NDP
-       in place of ARP), IPX, ARP+L3/4 (no need for asymmetric ARP - poison
+       in place of ARP), IPX, ARP+L3/4 (no need for asymmetric ARP — poison
        ARP cache, send spoofed ping and wait for reply; can be used with TCP
        or UDP).
      * Are all recognized topologies correct? In particular direct
@@ -286,6 +258,6 @@ Etherbat - Ethernet topology discovery
 
   Author/contact
 
-   This software was written by me, Pawel Pokrywka. You can find my email
-   address as well as my gpg key at:
-   https://secure.cryptonix.org/
+   This software was written by me, Paweł Pokrywka. You can find my email
+   address at:
+   https://blog.pawelpokrywka.com

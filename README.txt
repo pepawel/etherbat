@@ -260,4 +260,4 @@ Etherbat — Ethernet topology discovery
 
    This software was written by me, Paweł Pokrywka. You can find my email
    address at:
-   https://blog.pawelpokrywka.com
+   https://www.pawelpokrywka.com
